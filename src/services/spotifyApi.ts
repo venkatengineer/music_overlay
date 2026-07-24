@@ -27,7 +27,18 @@ export class SpotifyApiService {
   private static pollingTimer: number | null = null;
 
   public static getRedirectUri(): string {
+    const saved = localStorage.getItem('spotify_redirect_uri');
+    if (saved) return saved.trim();
+
+    if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+      const origin = window.location.origin;
+      return origin.endsWith('/') ? origin : `${origin}/`;
+    }
     return 'http://127.0.0.1:3000/';
+  }
+
+  public static setRedirectUri(uri: string) {
+    localStorage.setItem('spotify_redirect_uri', uri.trim());
   }
 
   public static generateCodeVerifier(length = 64): string {
@@ -73,13 +84,52 @@ export class SpotifyApiService {
 
     const authUrl = `https://accounts.spotify.com/authorize?${params.toString()}`;
     console.log('[SPOTIFY AUTH] Launching authorization popup:', authUrl);
+    console.log('[SPOTIFY AUTH] Using Redirect URI:', redirectUri);
+
     const popup = window.open(authUrl, 'Spotify Authorization', 'width=500,height=700');
 
     return new Promise((resolve) => {
+      let resolved = false;
+
+      const finish = (token: string | null) => {
+        if (resolved) return;
+        resolved = true;
+        window.removeEventListener('message', messageHandler);
+        if (checkPopup) clearInterval(checkPopup);
+        resolve(token);
+      };
+
+      const messageHandler = async (event: MessageEvent) => {
+        if (event.data && event.data.type === 'SPOTIFY_AUTH_CODE' && event.data.code) {
+          console.log('[SPOTIFY AUTH] Received postMessage code from popup window!');
+          if (popup && !popup.closed) {
+            try { popup.close(); } catch (e) {}
+          }
+          const token = await SpotifyApiService.exchangeCodeForToken(clientId, event.data.code);
+          finish(token);
+        }
+      };
+
+      window.addEventListener('message', messageHandler);
+
       const checkPopup = setInterval(async () => {
+        if (resolved) return;
+
+        // Check if token was set by Electron IPC or another handler in background
+        const existingToken = SpotifyApiService.getStoredAccessToken();
+        if (existingToken) {
+          if (popup && !popup.closed) {
+            try { popup.close(); } catch (e) {}
+          }
+          finish(existingToken);
+          return;
+        }
+
         if (!popup || popup.closed) {
-          clearInterval(checkPopup);
-          resolve(SpotifyApiService.getStoredAccessToken());
+          // Wait briefly before resolving to allow async token exchange to finish if popup just closed
+          setTimeout(() => {
+            finish(SpotifyApiService.getStoredAccessToken());
+          }, 600);
           return;
         }
 
@@ -88,17 +138,16 @@ export class SpotifyApiService {
             const urlParams = new URLSearchParams(popup.location.search);
             const code = urlParams.get('code');
             popup.close();
-            clearInterval(checkPopup);
 
             if (code) {
               const token = await SpotifyApiService.exchangeCodeForToken(clientId, code);
-              resolve(token);
+              finish(token);
             } else {
-              resolve(null);
+              finish(null);
             }
           }
         } catch (e) {
-          // Cross-origin check before redirect
+          // Cross-origin check thrown before redirect, normal browser security behavior
         }
       }, 500);
     });
@@ -106,7 +155,11 @@ export class SpotifyApiService {
 
   public static async exchangeCodeForToken(clientId: string, code: string): Promise<string | null> {
     const verifier = localStorage.getItem('spotify_code_verifier');
-    if (!verifier) return null;
+    if (!verifier) {
+      console.error('Spotify token exchange failed: No PKCE code_verifier found in localStorage.');
+      alert('Spotify authentication error: Code verifier missing. Please try clicking "Authorize Spotify Login" again.');
+      return null;
+    }
 
     const redirectUri = this.getRedirectUri();
     const body = new URLSearchParams({
@@ -117,6 +170,8 @@ export class SpotifyApiService {
       code_verifier: verifier,
     });
 
+    console.log('[SPOTIFY AUTH] Exchanging code for token with Redirect URI:', redirectUri);
+
     try {
       const response = await fetch('https://accounts.spotify.com/api/token', {
         method: 'POST',
@@ -126,20 +181,74 @@ export class SpotifyApiService {
 
       if (!response.ok) {
         const errBody = await response.text();
-        throw new Error(`Failed to exchange token: ${errBody}`);
-      }
-      const data = await response.json();
+        console.error(`Spotify API token exchange error [${response.status}]:`, errBody);
 
+        let parsedMessage = errBody;
+        try {
+          const parsed = JSON.parse(errBody);
+          parsedMessage = parsed.error_description || parsed.error || errBody;
+        } catch (e) {}
+
+        alert(`Spotify Login Failed (${response.status}): ${parsedMessage}\n\nMake sure your Spotify Developer Dashboard contains this EXACT Redirect URI:\n${redirectUri}`);
+        return null;
+      }
+
+      const data = await response.json();
       const expiresAt = Date.now() + data.expires_in * 1000;
       localStorage.setItem('spotify_access_token', data.access_token);
       if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
       localStorage.setItem('spotify_token_expires_at', expiresAt.toString());
 
+      console.log('[SPOTIFY AUTH] Access Token stored successfully!');
       return data.access_token;
     } catch (err) {
       console.error('Spotify token exchange error:', err);
+      alert('Failed to connect to Spotify token endpoint. Please check your internet connection.');
       return null;
     }
+  }
+
+  public static checkAndHandleCallback(): boolean {
+    if (typeof window === 'undefined') return false;
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    const error = urlParams.get('error');
+
+    if (error) {
+      console.warn('[SPOTIFY AUTH] Authorization error from query params:', error);
+      if (window.opener && window.opener !== window) {
+        try { window.close(); } catch (e) {}
+      }
+      return false;
+    }
+
+    if (code) {
+      console.log('[SPOTIFY AUTH] Detected OAuth code in URL params!');
+      if (window.opener && window.opener !== window) {
+        // Send code back to parent window
+        try {
+          window.opener.postMessage({ type: 'SPOTIFY_AUTH_CODE', code }, '*');
+          console.log('[SPOTIFY AUTH] Posted code to window.opener, closing popup window.');
+          setTimeout(() => {
+            try { window.close(); } catch (e) {}
+          }, 200);
+          return true;
+        } catch (e) {
+          console.error('Failed to postMessage to opener:', e);
+        }
+      } else {
+        // Direct redirect in main window
+        const clientId = localStorage.getItem('spotify_client_id') || DEFAULT_CLIENT_ID;
+        SpotifyApiService.exchangeCodeForToken(clientId, code).then((token) => {
+          if (token) {
+            window.history.replaceState({}, document.title, window.location.pathname);
+            window.location.reload();
+          }
+        });
+        return true;
+      }
+    }
+    return false;
   }
 
   public static getStoredAccessToken(): string | null {

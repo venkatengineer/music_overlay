@@ -165,6 +165,40 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   }, []);
 
+  // Handle initial URL callback check (e.g. if loaded in popup window or redirect)
+  useEffect(() => {
+    SpotifyApiService.checkAndHandleCallback();
+  }, []);
+
+  // Listen for Spotify Auth Code from IPC (Electron) or postMessage (Browser Popup)
+  useEffect(() => {
+    const handleAuthCode = async (code: string) => {
+      console.log('[AUDIO ENGINE] Received Spotify OAuth code! Exchanging for token...');
+      const clientId = settings.spotifyClientId || localStorage.getItem('spotify_client_id') || 'b977c4d20ba7494a8dea2a61285e84ce';
+      const token = await SpotifyApiService.exchangeCodeForToken(clientId, code);
+      if (token) {
+        console.log('[AUDIO ENGINE] Spotify Token Exchange SUCCESS!');
+        setIsSpotifyConnected(true);
+        setActiveSource('spotify');
+      }
+    };
+
+    if ((window as any).electronAPI?.onSpotifyAuthCode) {
+      (window as any).electronAPI.onSpotifyAuthCode(handleAuthCode);
+    }
+
+    const messageListener = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'SPOTIFY_AUTH_CODE' && event.data.code) {
+        handleAuthCode(event.data.code);
+      }
+    };
+    window.addEventListener('message', messageListener);
+
+    return () => {
+      window.removeEventListener('message', messageListener);
+    };
+  }, [settings.spotifyClientId]);
+
   // Spotify Live Player Polling Engine
   useEffect(() => {
     if (isSpotifyConnected) {

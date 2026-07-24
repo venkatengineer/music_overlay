@@ -8,16 +8,28 @@ export const SettingsModal: React.FC = () => {
   const { settings, updateSettings } = useThemeSettings();
   const { loadLocalFile, isSpotifyConnected, connectSpotify, disconnectSpotify, spotifyUserDisplayName } = useAudioEngine();
   const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [spotifyIdInput, setSpotifyIdInput] = useState<string>(settings.spotifyClientId || localStorage.getItem('spotify_client_id') || '');
+  const [spotifyIdInput, setSpotifyIdInput] = useState<string>(settings.spotifyClientId || localStorage.getItem('spotify_client_id') || 'b977c4d20ba7494a8dea2a61285e84ce');
+  const [redirectUriInput, setRedirectUriInput] = useState<string>(() => {
+    const saved = localStorage.getItem('spotify_redirect_uri');
+    if (saved) return saved.trim();
+    if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
+      const origin = window.location.origin;
+      return origin.endsWith('/') ? origin : `${origin}/`;
+    }
+    return 'http://127.0.0.1:3000/';
+  });
   const [showGuide, setShowGuide] = useState<boolean>(false);
 
   const handleSpotifyConnect = () => {
     if (!spotifyIdInput.trim()) {
-      alert('Please enter your Spotify Client ID first! Click "How to get a Client ID?" below for step-by-step instructions.');
+      alert('Please enter your Spotify Client ID first!');
       return;
     }
-    localStorage.setItem('spotify_client_id', spotifyIdInput.trim());
-    updateSettings({ spotifyClientId: spotifyIdInput.trim() });
+    const cleanId = spotifyIdInput.trim();
+    const cleanUri = redirectUriInput.trim();
+    localStorage.setItem('spotify_client_id', cleanId);
+    localStorage.setItem('spotify_redirect_uri', cleanUri);
+    updateSettings({ spotifyClientId: cleanId });
     connectSpotify();
   };
 
@@ -160,15 +172,37 @@ export const SettingsModal: React.FC = () => {
               ) : (
                 <div className="space-y-2">
                   <p className="text-[11px] text-slate-400 font-rajdhani">
-                    Enter your Spotify Client ID to authorize live track streaming & controls.
+                    Enter your Spotify Client ID & match your Redirect URI.
                   </p>
-                  <input
-                    type="text"
-                    placeholder="Paste Spotify Client ID here..."
-                    value={spotifyIdInput}
-                    onChange={(e) => setSpotifyIdInput(e.target.value)}
-                    className="w-full px-3 py-2 rounded-xl bg-black/60 border border-emerald-500/40 font-mono text-xs text-white placeholder-slate-600 focus:border-emerald-400 outline-none"
-                  />
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-mono">SPOTIFY CLIENT ID:</label>
+                    <input
+                      type="text"
+                      placeholder="Paste Spotify Client ID here..."
+                      value={spotifyIdInput}
+                      onChange={(e) => setSpotifyIdInput(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl bg-black/60 border border-emerald-500/40 font-mono text-xs text-white placeholder-slate-600 focus:border-emerald-400 outline-none mt-0.5"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] text-slate-400 font-mono">SPOTIFY REDIRECT URI:</label>
+                    <select
+                      value={redirectUriInput}
+                      onChange={(e) => setRedirectUriInput(e.target.value)}
+                      className="w-full px-3 py-1.5 rounded-xl bg-black/80 border border-emerald-500/40 font-mono text-xs text-emerald-300 focus:border-emerald-400 outline-none mt-0.5"
+                    >
+                      {typeof window !== 'undefined' && window.location.protocol.startsWith('http') && (
+                        <option value={window.location.origin.endsWith('/') ? window.location.origin : `${window.location.origin}/`}>
+                          {window.location.origin.endsWith('/') ? window.location.origin : `${window.location.origin}/`} (Active Browser Origin)
+                        </option>
+                      )}
+                      <option value="http://localhost:3000/">http://localhost:3000/</option>
+                      <option value="http://localhost:3000">http://localhost:3000</option>
+                      <option value="http://127.0.0.1:3000/">http://127.0.0.1:3000/</option>
+                      <option value="http://127.0.0.1:3000">http://127.0.0.1:3000</option>
+                    </select>
+                  </div>
 
                   <button
                     onClick={handleSpotifyConnect}
@@ -192,9 +226,9 @@ export const SettingsModal: React.FC = () => {
                       <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-300">
                         <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" className="text-cyan-400 underline font-mono inline-flex items-center gap-0.5">developer.spotify.com/dashboard <ExternalLink className="w-3 h-3" /></a></li>
                         <li>Click <strong>Create App</strong> (or select an existing App) and click <strong>Edit Settings</strong>.</li>
-                        <li>Under <strong>Redirect URIs</strong>, add:
-                          <div className="my-1 font-mono text-[11px] text-emerald-300 bg-black/60 p-2 rounded border border-emerald-500/40 select-all">
-                            http://127.0.0.1:3000/
+                        <li>Under <strong>Redirect URIs</strong>, add this EXACT link:
+                          <div className="my-1 font-mono text-[11px] text-emerald-300 bg-black/60 p-2 rounded border border-emerald-500/40 select-all font-semibold">
+                            {redirectUriInput}
                           </div>
                         </li>
                         <li>Copy your <strong>Client ID</strong>, paste it above, and click <strong>AUTHORIZE SPOTIFY LOGIN</strong>!</li>

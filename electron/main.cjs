@@ -16,18 +16,66 @@ console.log('====================================================');
 
 let mainWindow = null;
 let tray = null;
+let oauthServer = null;
 
-function checkUrlLive(url) {
-  return new Promise((resolve) => {
-    const req = http.get(url, (res) => {
-      resolve(res.statusCode === 200);
+function startOAuthServer() {
+  if (oauthServer) return;
+  try {
+    oauthServer = http.createServer((req, res) => {
+      const reqUrl = new URL(req.url, 'http://127.0.0.1:3000');
+      const code = reqUrl.searchParams.get('code');
+
+      if (code && mainWindow) {
+        console.log('[SPOTIFY OAUTH SERVER] Received authorization code! Forwarding to renderer...');
+        mainWindow.webContents.send('spotify-auth-code', code);
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Aetheris OS - Spotify Connected</title>
+              <style>
+                body { background: #040d12; color: #00ffaa; font-family: monospace; text-align: center; padding-top: 40px; }
+                .card { border: 1.5px solid #00ffaa; border-radius: 16px; padding: 25px; display: inline-block; box-shadow: 0 0 25px #00ffaa; background: #061822; }
+                h2 { margin: 0; font-size: 24px; letter-spacing: 2px; }
+                p { color: #00e5ff; }
+              </style>
+            </head>
+            <body>
+              <div class="card">
+                <h2>🛸 AETHERIS OS</h2>
+                <h4 style="color:#ffffff;">SPOTIFY AUTHORIZATION SUCCESSFUL!</h4>
+                <p>Syncing live music stream with HUD overlay...</p>
+              </div>
+              <script>
+                if (window.opener) {
+                  try { window.opener.postMessage({ type: 'SPOTIFY_AUTH_CODE', code: ${JSON.stringify(code)} }, '*'); } catch(e) {}
+                }
+                setTimeout(() => window.close(), 1000);
+              </script>
+            </body>
+          </html>
+        `);
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' });
+      res.end('Aetheris OS OAuth Receiver Active');
     });
-    req.on('error', () => resolve(false));
-    req.setTimeout(800, () => {
-      req.destroy();
-      resolve(false);
+
+    oauthServer.listen(3000, '127.0.0.1', () => {
+      console.log('[LOG] Spotify OAuth Loopback Receiver active at http://127.0.0.1:3000/');
     });
-  });
+
+    oauthServer.on('error', (err) => {
+      console.warn('[WARN] OAuth server note:', err.message);
+    });
+  } catch (e) {
+    console.warn('[WARN] Could not start OAuth loopback server:', e);
+  }
 }
 
 async function createWindow() {
@@ -56,16 +104,11 @@ async function createWindow() {
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
   const devUrl = 'http://localhost:3000';
-  const isDevLive = await checkUrlLive(devUrl);
+  const isDevLive = false; // Force loading built dist files for full desktop consistency
 
-  if (isDevLive) {
-    console.log('[LOG] Connecting to Vite dev server at:', devUrl);
-    mainWindow.loadURL(devUrl);
-  } else {
-    const indexPath = path.join(__dirname, '../dist/index.html');
-    console.log('[LOG] Loading local production build at:', indexPath);
-    mainWindow.loadFile(indexPath);
-  }
+  const indexPath = path.join(__dirname, '../dist/index.html');
+  console.log('[LOG] Loading local production build at:', indexPath);
+  mainWindow.loadFile(indexPath);
 
   mainWindow.show();
   mainWindow.focus();
@@ -142,6 +185,7 @@ async function createWindow() {
 
 app.whenReady().then(() => {
   console.log('[LOG] Electron app is ready.');
+  startOAuthServer();
   createWindow();
 
   app.on('activate', () => {
@@ -159,6 +203,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   console.log('[LOG] App quitting. Unregistering global shortcuts.');
   globalShortcut.unregisterAll();
+  if (oauthServer) oauthServer.close();
 });
 
 ipcMain.on('toggle-always-on-top', (event, flag) => {
