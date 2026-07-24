@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --primary-color: #00ffaa;
+  --secondary-color: #00e5ff;
+  --accent-color: #b026ff;
+  --bg-alpha: 0.82;
+  --glow-intensity: 1.2;
+}
+
+/* Theme variables */
+[data-theme="alien-green"] {
+  --primary-color: #00ffaa;
+  --secondary-color: #00e5ff;
+  --accent-color: #b026ff;
+}
+
+[data-theme="deep-space-blue"] {
+  --primary-color: #00bfff;
+  --secondary-color: #3b82f6;
+  --accent-color: #8b5cf6;
+}
+
+[data-theme="red-plasma"] {
+  --primary-color: #ff0055;
+  --secondary-color: #ff5500;
+  --accent-color: #ff00aa;
+}
+
+[data-theme="white-hologram"] {
+  --primary-color: #ffffff;
+  --secondary-color: #80e5ff;
+  --accent-color: #d8b4fe;
+}
+
+[data-theme="amber-reactor"] {
+  --primary-color: #ffaa00;
+  --secondary-color: #ff5500;
+  --accent-color: #eab308;
+}
+
+/* Custom Scrollbar for alien HUD */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 10, 15, 0.5);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--primary-color);
+  border-radius: 4px;
+  box-shadow: 0 0 8px var(--primary-color);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary-color);
+}
+
+/* Alien Glass Floating HUD Panel */
+.alien-glass {
+  background-color: rgba(4, 12, 18, var(--bg-alpha));
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  border: 1.5px solid var(--primary-color);
+  box-shadow: 0 0 calc(22px * var(--glow-intensity)) var(--primary-color),
+              inset 0 0 calc(12px * var(--glow-intensity)) var(--primary-color);
+}
+
+.alien-glow-border {
+  border-color: var(--primary-color);
+  box-shadow: 0 0 calc(22px * var(--glow-intensity)) var(--primary-color),
+              inset 0 0 calc(12px * var(--glow-intensity)) var(--primary-color);
+}
+
+.alien-text-glow {
+  text-shadow: 0 0 calc(12px * var(--glow-intensity)) var(--primary-color);
+}
+
+/* Holographic 3D Disc Shimmer Shader effect */
+.disc-iridescence {
+  background: radial-gradient(
+    circle at 35% 35%,
+    rgba(255, 255, 255, 0.4) 0%,
+    rgba(0, 255, 255, 0.2) 20%,
+    rgba(255, 0, 255, 0.2) 40%,
+    rgba(255, 255, 0, 0.2) 60%,
+    transparent 80%
+  );
+}
+
+/* Drag handle class for desktop windowing */
+.drag-handle {
+  -webkit-app-region: drag;
+}
+
+.no-drag {
+  -webkit-app-region: no-drag;
+}
