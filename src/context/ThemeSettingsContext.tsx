@@ -86,6 +86,9 @@ export const ThemeSettingsProvider: React.FC<{ children: React.ReactNode }> = ({
     document.documentElement.style.setProperty('--primary-color', themeConfig.primary);
     document.documentElement.style.setProperty('--secondary-color', themeConfig.secondary);
     document.documentElement.style.setProperty('--accent-color', themeConfig.accent);
+    document.documentElement.style.setProperty('--primary-glow', `${themeConfig.primary}80`);
+    document.documentElement.style.setProperty('--secondary-glow', `${themeConfig.secondary}60`);
+    document.documentElement.style.setProperty('--accent-glow', `${themeConfig.accent}80`);
     document.documentElement.style.setProperty('--bg-alpha', settings.transparency.toString());
     document.documentElement.style.setProperty('--glow-intensity', settings.glowIntensity.toString());
   }, [settings, themeConfig]);

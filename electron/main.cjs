@@ -48,7 +48,8 @@ function startOAuthServer(portsToTry = [3000, 3001, 3002, 3003]) {
         const code = reqUrl.searchParams.get('code');
 
         if (code && mainWindow) {
-          console.log('[SPOTIFY OAUTH SERVER] Received authorization code! Forwarding to renderer...');
+          console.log('[RUNTIME LOG] Electron received auth code:', code);
+          console.log('[RUNTIME LOG] IPC event sent: spotify-auth-code');
           mainWindow.webContents.send('spotify-auth-code', code);
           res.writeHead(200, {
             'Content-Type': 'text/html',

@@ -3,6 +3,7 @@ import { Track, Album, AudioMetrics } from '../types/music';
 import { SpotifyApiService, SpotifyPlayerState } from '../services/spotifyApi';
 import { GenreDetectionEngine, GenreThemeMapping, GENRE_MAPPINGS } from '../services/genreEngine';
 import { useThemeSettings } from './ThemeSettingsContext';
+import { extractThemeFromImage } from '../utils/colorExtractor';
 
 // Empty track placeholder — shown when no Spotify track is loaded yet
 export const EMPTY_TRACK: Track = {
@@ -197,6 +198,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Listen for Spotify Auth Code from IPC (Electron) or postMessage (Browser Popup)
   useEffect(() => {
     const handleAuthCode = async (code: string) => {
+      console.log('[RUNTIME LOG] Renderer received IPC: spotify-auth-code');
       console.log('[AUDIO ENGINE] Received Spotify OAuth code! Exchanging for token...');
       const clientId = settings.spotifyClientId || localStorage.getItem('spotify_client_id') || 'b977c4d20ba7494a8dea2a61285e84ce';
       const token = await SpotifyApiService.exchangeCodeForToken(clientId, code);
@@ -222,6 +224,8 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
       window.removeEventListener('message', messageListener);
     };
   }, [settings.spotifyClientId]);
+
+  const optimisticTrackLockRef = useRef<{ trackId: string; timestamp: number } | null>(null);
 
   // Spotify Live Player Polling & Music Library Sync Engine
   useEffect(() => {
@@ -259,8 +263,27 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
       SpotifyApiService.startPlayerPolling((state: SpotifyPlayerState | null) => {
         if (state && state.item) {
+          // Do not overwrite if user has actively started a local audio file
+          if (activeSource === 'local' && isPlaying) return;
+          const fetchedTrackId = `spotify:${state.item.id}`;
+
+          // Optimistic Track Lock: Protect user-selected track from being reverted by stale polling data (4.5s threshold)
+          if (optimisticTrackLockRef.current) {
+            const elapsed = Date.now() - optimisticTrackLockRef.current.timestamp;
+            if (elapsed < 4500) {
+              if (fetchedTrackId !== optimisticTrackLockRef.current.trackId) {
+                console.log('[AUDIO ENGINE] Ignored stale Spotify polling update while optimistic track lock is active.');
+                return;
+              } else {
+                optimisticTrackLockRef.current = null;
+              }
+            } else {
+              optimisticTrackLockRef.current = null;
+            }
+          }
+
           const spotifyTrack: Track = {
-            id: `spotify:${state.item.id}`,
+            id: fetchedTrackId,
             title: state.item.name,
             artist: state.item.artists.map((a) => a.name).join(', '),
             album: state.item.album.name,
@@ -276,11 +299,9 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
           setDuration(Math.round(state.durationMs / 1000));
           setActiveSource('spotify');
 
-          // Trigger Auto-Genre Morphing
-          const detected = GenreDetectionEngine.detectGenre(spotifyTrack);
-          setGenreMapping(detected);
-          if (settings.autoMorphGenreTheme) {
-            updateSettings({ theme: detected.themeId });
+          // Trigger Album Cover Color Extraction & Auto Theme Morphing
+          if (currentTrack.id !== spotifyTrack.id) {
+            updateGenreAndTheme(spotifyTrack);
           }
         }
       }, 1500);
@@ -376,21 +397,48 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
         lastUpdate = time;
         if (analyserRef.current) {
           analyserRef.current.getByteFrequencyData(dataArray);
-          let bassSum = 0, midSum = 0, trebleSum = 0;
-          for (let i = 0; i < 15; i++) bassSum += dataArray[i];
-          for (let i = 16; i < 50; i++) midSum += dataArray[i];
-          for (let i = 51; i < 120; i++) trebleSum += dataArray[i];
-          const bassVal = Math.min(1, (bassSum / 15) / 255);
-          const midVal = Math.min(1, (midSum / 34) / 255);
-          const trebleVal = Math.min(1, (trebleSum / 69) / 255);
-          setAudioMetrics({
-            bass: bassVal,
-            mid: midVal,
-            treble: trebleVal,
-            overall: bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2,
-            rawFrequencyData: new Uint8Array(dataArray),
-          });
         }
+
+        // Check if real Web Audio analyzer data is active (> 5)
+        let maxVal = 0;
+        for (let i = 0; i < 64; i++) {
+          if (dataArray[i] > maxVal) maxVal = dataArray[i];
+        }
+
+        // If playing remote audio (e.g. Spotify remote player) or silent stream, synthesize dynamic 125 BPM beat pulse!
+        if (maxVal < 5) {
+          const beatFreq = 2.1; // ~125 BPM
+          const t = time / 1000;
+          const kick = Math.pow(Math.max(0, Math.sin(t * Math.PI * beatFreq)), 4);
+          const snare = Math.pow(Math.max(0, Math.sin((t + 0.25) * Math.PI * beatFreq)), 8);
+          
+          for (let i = 0; i < 128; i++) {
+            let synth = 0;
+            if (i < 12) { // Bass
+              synth = kick * 210 + Math.sin(t * 12 + i) * 40;
+            } else if (i < 45) { // Mid
+              synth = snare * 160 + Math.cos(t * 16 + i) * 45 + Math.sin(t * 9) * 30;
+            } else { // Treble
+              synth = (Math.random() * 0.4 + 0.3) * (kick * 130 + 45);
+            }
+            dataArray[i] = Math.min(255, Math.max(12, Math.round(synth)));
+          }
+        }
+
+        let bassSum = 0, midSum = 0, trebleSum = 0;
+        for (let i = 0; i < 15; i++) bassSum += dataArray[i];
+        for (let i = 16; i < 50; i++) midSum += dataArray[i];
+        for (let i = 51; i < 120; i++) trebleSum += dataArray[i];
+        const bassVal = Math.min(1, (bassSum / 15) / 255);
+        const midVal = Math.min(1, (midSum / 34) / 255);
+        const trebleVal = Math.min(1, (trebleSum / 69) / 255);
+        setAudioMetrics({
+          bass: bassVal,
+          mid: midVal,
+          treble: trebleVal,
+          overall: bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2,
+          rawFrequencyData: new Uint8Array(dataArray),
+        });
       }
       animFrameRef.current = requestAnimationFrame(renderLoop);
     };
@@ -399,12 +447,17 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
   }, [isPlaying]);
 
-  const updateGenreAndTheme = (track: Track) => {
+  const updateGenreAndTheme = async (track: Track) => {
     const detectedMapping = GenreDetectionEngine.detectGenre(track);
     setGenreMapping(detectedMapping);
 
     if (settings.autoMorphGenreTheme) {
-      updateSettings({ theme: detectedMapping.themeId });
+      if (track.coverUrl) {
+        const extractedTheme = await extractThemeFromImage(track.coverUrl);
+        updateSettings({ theme: extractedTheme });
+      } else {
+        updateSettings({ theme: detectedMapping.themeId });
+      }
     }
   };
 
@@ -429,6 +482,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const playTrack = (track: Track) => {
+    optimisticTrackLockRef.current = { trackId: track.id, timestamp: Date.now() };
     setCurrentTrack(track);
     setCurrentTime(0);
     setDuration(track.duration || 0);

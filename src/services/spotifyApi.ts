@@ -8,6 +8,7 @@ const SPOTIFY_SCOPES = [
   'user-read-currently-playing',
   'playlist-read-private',
   'user-library-read',
+  'user-read-private',
 ].join(' ');
 
 export interface SpotifyPlayerState {
@@ -23,8 +24,38 @@ export interface SpotifyPlayerState {
   } | null;
 }
 
+export interface SpotifySearchTrackItem extends Track {
+  explicit: boolean;
+  externalUrl?: string;
+}
+
+export interface SpotifySearchAlbumItem {
+  id: string;
+  name: string;
+  artist: string;
+  coverUrl: string;
+  releaseYear: string;
+  externalUrl?: string;
+  uri: string;
+}
+
+export interface SpotifySearchArtistItem {
+  id: string;
+  name: string;
+  imageUrl: string;
+  externalUrl?: string;
+  uri: string;
+}
+
+export interface OfficialSpotifySearchResult {
+  tracks: SpotifySearchTrackItem[];
+  albums: SpotifySearchAlbumItem[];
+  artists: SpotifySearchArtistItem[];
+}
+
 export class SpotifyApiService {
   private static pollingTimer: number | null = null;
+  private static searchCache = new Map<string, OfficialSpotifySearchResult>();
 
   public static getRedirectUri(): string {
     const saved = localStorage.getItem('spotify_redirect_uri');
@@ -60,6 +91,7 @@ export class SpotifyApiService {
 
   // Interactive Popup Authorization Flow
   public static async loginWithPopup(customClientId?: string): Promise<string | null> {
+    console.log('[SPOTIFY AUTH TRACE] LOGIN START');
     const rawId = customClientId || localStorage.getItem('spotify_client_id') || DEFAULT_CLIENT_ID || '';
     const clientId = rawId.trim().replace(/^["']|["']$/g, '');
 
@@ -69,9 +101,17 @@ export class SpotifyApiService {
     }
 
     const verifier = this.generateCodeVerifier();
+    console.log('[SPOTIFY AUTH TRACE] Generated verifier:', verifier);
+
     localStorage.setItem('spotify_code_verifier', verifier);
+    const storedVerifierAfterSave = localStorage.getItem('spotify_code_verifier');
+    console.log('[SPOTIFY AUTH TRACE] Saved verifier:', verifier);
+    console.log('[SPOTIFY AUTH TRACE] Verifier after save:', storedVerifierAfterSave);
+
     const challenge = await this.generateCodeChallenge(verifier);
     const redirectUri = this.getRedirectUri();
+
+    console.log('[SPOTIFY AUTH TRACE] Verifier before redirect:', localStorage.getItem('spotify_code_verifier'));
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -101,6 +141,7 @@ export class SpotifyApiService {
 
       const messageHandler = async (event: MessageEvent) => {
         if (event.data && event.data.type === 'SPOTIFY_AUTH_CODE' && event.data.code) {
+          console.log('[SPOTIFY AUTH TRACE] Verifier after redirect:', localStorage.getItem('spotify_code_verifier'));
           console.log('[SPOTIFY AUTH] Received postMessage code from popup window!');
           if (popup && !popup.closed) {
             try { popup.close(); } catch (e) {}
@@ -126,7 +167,6 @@ export class SpotifyApiService {
         }
 
         if (!popup || popup.closed) {
-          // Wait briefly before resolving to allow async token exchange to finish if popup just closed
           setTimeout(() => {
             finish(SpotifyApiService.getStoredAccessToken());
           }, 600);
@@ -147,13 +187,14 @@ export class SpotifyApiService {
             }
           }
         } catch (e) {
-          // Cross-origin check thrown before redirect, normal browser security behavior
+          // Cross-origin check
         }
       }, 500);
     });
   }
 
   public static async exchangeCodeForToken(clientId: string, code: string): Promise<string | null> {
+    console.log('[SPOTIFY AUTH TRACE] Verifier before exchange:', localStorage.getItem('spotify_code_verifier'));
     const verifier = localStorage.getItem('spotify_code_verifier');
     if (!verifier) {
       console.error('Spotify token exchange failed: No PKCE code_verifier found in localStorage.');
@@ -198,6 +239,13 @@ export class SpotifyApiService {
       localStorage.setItem('spotify_access_token', data.access_token);
       if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
       localStorage.setItem('spotify_token_expires_at', expiresAt.toString());
+
+      console.log('POST https://accounts.spotify.com/api/token');
+      console.log('HTTP Status:', response.status);
+      console.log('HTTP Response Body:', data);
+      console.log('Access Token:', data.access_token);
+      console.log('Stored access token:', localStorage.getItem('spotify_access_token'));
+      console.log('[SPOTIFY AUTH TRACE] Verifier after exchange:', localStorage.getItem('spotify_code_verifier'));
 
       console.log('[SPOTIFY AUTH] Access Token stored successfully!');
       return data.access_token;
@@ -301,11 +349,12 @@ export class SpotifyApiService {
     const token = localStorage.getItem('spotify_access_token');
     const expiresAt = Number(localStorage.getItem('spotify_token_expires_at') || 0);
 
-    if (token && Date.now() < expiresAt - 30000) {
+    if (token && (expiresAt === 0 || Date.now() < expiresAt - 30000)) {
       return token;
     }
 
-    return await this.refreshAccessToken();
+    const refreshed = await this.refreshAccessToken();
+    return refreshed || token;
   }
 
   public static logout() {
@@ -323,7 +372,8 @@ export class SpotifyApiService {
     const token = await this.getValidAccessToken();
     if (!token) throw new Error('Not authenticated with Spotify');
 
-    const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
+    const url = `https://api.spotify.com/v1${endpoint}`;
+    const res = await fetch(url, {
       ...options,
       headers: {
         ...options.headers,
@@ -337,6 +387,7 @@ export class SpotifyApiService {
       const errText = await res.text();
       throw new Error(`Spotify API error [${res.status}]: ${errText}`);
     }
+
     return res.json();
   }
 
@@ -429,26 +480,67 @@ export class SpotifyApiService {
     return this.fetchApi(`/me/player/volume?volume_percent=${Math.round(volumePercent)}`, { method: 'PUT' });
   }
 
-  public static async search(query: string): Promise<Track[]> {
-    if (!query.trim()) return [];
-    try {
-      const data = await this.fetchApi(`/search?q=${encodeURIComponent(query)}&type=track&limit=15`);
-      if (!data?.tracks?.items) return [];
+  public static async searchOfficial(query: string, signal?: AbortSignal): Promise<OfficialSpotifySearchResult> {
+    const q = query.trim();
+    if (!q) return { tracks: [], albums: [], artists: [] };
 
-      return data.tracks.items.map((item: any) => ({
-        id: `spotify:${item.id}`,
-        title: item.name,
-        artist: item.artists.map((a: any) => a.name).join(', '),
-        album: item.album.name,
-        coverUrl: item.album.images[0]?.url || '/cover1.png',
-        duration: Math.round(item.duration_ms / 1000),
-        source: 'spotify' as const,
-        spotifyUri: item.uri,
-      }));
-    } catch (err) {
-      console.warn('Spotify search failed:', err);
-      return [];
+    const cacheKey = q.toLowerCase();
+    if (this.searchCache.has(cacheKey)) {
+      return this.searchCache.get(cacheKey)!;
     }
+
+    const data = await this.fetchApi(
+      `/search?q=${encodeURIComponent(q)}&type=track,album,artist&limit=10`,
+      { signal }
+    );
+
+    if (!data) return { tracks: [], albums: [], artists: [] };
+
+    const tracks: SpotifySearchTrackItem[] = (data.tracks?.items || []).map((item: any) => ({
+      id: `spotify:${item.id}`,
+      title: item.name,
+      artist: item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+      album: item.album?.name || 'Single',
+      coverUrl: item.album?.images?.[0]?.url || item.album?.images?.[1]?.url || '/cover1.png',
+      duration: Math.round((item.duration_ms || 0) / 1000),
+      source: 'spotify' as const,
+      spotifyUri: item.uri,
+      explicit: Boolean(item.explicit),
+      externalUrl: item.external_urls?.spotify,
+    }));
+
+    const albums: SpotifySearchAlbumItem[] = (data.albums?.items || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      artist: item.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+      coverUrl: item.images?.[0]?.url || item.images?.[1]?.url || '/cover1.png',
+      releaseYear: item.release_date ? item.release_date.substring(0, 4) : '',
+      externalUrl: item.external_urls?.spotify,
+      uri: item.uri,
+    }));
+
+    const artists: SpotifySearchArtistItem[] = (data.artists?.items || []).map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      imageUrl: item.images?.[0]?.url || item.images?.[1]?.url || '/cover1.png',
+      externalUrl: item.external_urls?.spotify,
+      uri: item.uri,
+    }));
+
+    const result: OfficialSpotifySearchResult = { tracks, albums, artists };
+
+    if (this.searchCache.size >= 50) {
+      const firstKey = this.searchCache.keys().next().value;
+      if (firstKey) this.searchCache.delete(firstKey);
+    }
+    this.searchCache.set(cacheKey, result);
+
+    return result;
+  }
+
+  public static async search(query: string): Promise<Track[]> {
+    const res = await this.searchOfficial(query);
+    return res.tracks;
   }
 
   public static async getUserSavedTracks(limit = 25): Promise<Track[]> {
