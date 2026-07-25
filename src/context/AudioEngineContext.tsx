@@ -13,74 +13,8 @@ export const EMPTY_TRACK: Track = {
   album: '',
   coverUrl: '/cover1.png',
   duration: 0,
-  source: 'galactic',
+  source: 'spotify',
 };
-
-export const GALACTIC_TRACKS: Track[] = [
-  {
-    id: 'gal-1',
-    title: 'Aetheris Horizon',
-    artist: 'Xenon Core',
-    album: 'Orion Sector VII',
-    coverUrl: '/cover1.png',
-    duration: 214,
-    source: 'galactic',
-    genre: 'ambient',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-  },
-  {
-    id: 'gal-2',
-    title: 'Quantum Synth Cyberpunk',
-    artist: 'Cybernetic Echoes',
-    album: 'Matrix Core',
-    coverUrl: '/cover2.png',
-    duration: 185,
-    source: 'galactic',
-    genre: 'synthwave',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-  },
-  {
-    id: 'gal-3',
-    title: 'Vortex Industrial',
-    artist: 'Rage Protocol',
-    album: 'Heavy Industrial',
-    coverUrl: '/cover3.png',
-    duration: 240,
-    source: 'galactic',
-    genre: 'metal',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
-  },
-  {
-    id: 'gal-4',
-    title: 'Solar Acoustic Jazz',
-    artist: 'Nebula Weaver',
-    album: 'Amber Lounge',
-    coverUrl: '/cover1.png',
-    duration: 298,
-    source: 'galactic',
-    genre: 'jazz',
-    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
-  },
-];
-
-export const DEMO_ALBUMS: Album[] = [
-  {
-    id: 'alb-1',
-    title: 'Orion Sector VII',
-    artist: 'Xenon Core',
-    coverUrl: '/cover1.png',
-    year: '3042',
-    tracks: [GALACTIC_TRACKS[0], GALACTIC_TRACKS[1]],
-  },
-  {
-    id: 'alb-2',
-    title: 'Zero-G Transmissions',
-    artist: 'Vortex Protocol',
-    coverUrl: '/cover2.png',
-    year: '3044',
-    tracks: [GALACTIC_TRACKS[2], GALACTIC_TRACKS[3]],
-  },
-];
 
 interface AudioEngineContextType {
   currentTrack: Track;
@@ -100,7 +34,7 @@ interface AudioEngineContextType {
   spotifyUserDisplayName?: string;
   
   // Actions
-  playTrack: (track: Track) => void;
+  playTrack: (track: Track, contextUri?: string) => void;
   togglePlayPause: () => void;
   nextTrack: () => void;
   previousTrack: () => void;
@@ -123,17 +57,17 @@ const AudioEngineContext = createContext<AudioEngineContextType | undefined>(und
 export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { settings, updateSettings } = useThemeSettings();
 
-  const [currentTrack, setCurrentTrack] = useState<Track>(GALACTIC_TRACKS[0]);
+  const [currentTrack, setCurrentTrack] = useState<Track>(EMPTY_TRACK);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
-  const [duration, setDuration] = useState<number>(GALACTIC_TRACKS[0].duration);
+  const [duration, setDuration] = useState<number>(0);
   const [volume, setVolumeState] = useState<number>(0.85);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
   const [isRepeat, setIsRepeat] = useState<boolean>(false);
-  const [queue, setQueue] = useState<Track[]>([GALACTIC_TRACKS[1], GALACTIC_TRACKS[2]]);
-  const [albums, setAlbums] = useState<Album[]>(DEMO_ALBUMS);
-  const [activeSource, setActiveSource] = useState<'galactic' | 'spotify' | 'local'>('galactic');
+  const [queue, setQueue] = useState<Track[]>([]);
+  const [albums, setAlbums] = useState<Album[]>([]);
+  const [activeSource, setActiveSource] = useState<'galactic' | 'spotify' | 'local'>('spotify');
 
   const [genreMapping, setGenreMapping] = useState<GenreThemeMapping>(GENRE_MAPPINGS.ambient);
   const [isSpotifyConnected, setIsSpotifyConnected] = useState<boolean>(!!SpotifyApiService.getStoredAccessToken());
@@ -257,57 +191,70 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         if (spotifyAlbums.length > 0) {
           console.log(`[AUDIO ENGINE] Loaded ${spotifyAlbums.length} Spotify collections into archive albums!`);
-          setAlbums([...spotifyAlbums, ...DEMO_ALBUMS]);
+          setAlbums(spotifyAlbums);
         }
       }).catch((err) => console.warn('[AUDIO ENGINE] Error loading Spotify library:', err));
 
       SpotifyApiService.startPlayerPolling((state: SpotifyPlayerState | null) => {
-        if (state && state.item) {
-          // Do not overwrite if user has actively started a local audio file
-          if (activeSource === 'local' && isPlaying) return;
-          const fetchedTrackId = `spotify:${state.item.id}`;
+        // State Rule: A transient Spotify API state (null, 204, or missing item) must NEVER destroy the last known valid track
+        if (!state || !state.item) {
+          return;
+        }
 
-          // Optimistic Track Lock: Protect user-selected track from being reverted by stale polling data (4.5s threshold)
-          if (optimisticTrackLockRef.current) {
-            const elapsed = Date.now() - optimisticTrackLockRef.current.timestamp;
-            if (elapsed < 4500) {
-              if (fetchedTrackId !== optimisticTrackLockRef.current.trackId) {
-                console.log('[AUDIO ENGINE] Ignored stale Spotify polling update while optimistic track lock is active.');
-                return;
-              } else {
-                optimisticTrackLockRef.current = null;
-              }
+        // Do not overwrite if user has actively started a local audio file
+        if (activeSource === 'local' && isPlaying) return;
+
+        // Ensure local HTML5 audio element is paused and cleared when Spotify is active
+        if (audioRef.current && (audioRef.current.src || !audioRef.current.paused)) {
+          audioRef.current.pause();
+          audioRef.current.src = '';
+        }
+
+        const fetchedTrackId = `spotify:${state.item.id}`;
+
+        // Optimistic Track Lock: Protect user-selected track from being reverted by stale polling data (4.5s threshold)
+        if (optimisticTrackLockRef.current) {
+          const elapsed = Date.now() - optimisticTrackLockRef.current.timestamp;
+          if (elapsed < 4500) {
+            if (fetchedTrackId !== optimisticTrackLockRef.current.trackId) {
+              console.log('[AUDIO ENGINE] Ignored stale Spotify polling update while optimistic track lock is active.');
+              return;
             } else {
               optimisticTrackLockRef.current = null;
             }
+          } else {
+            optimisticTrackLockRef.current = null;
           }
+        }
 
-          const spotifyTrack: Track = {
-            id: fetchedTrackId,
-            title: state.item.name,
-            artist: state.item.artists.map((a) => a.name).join(', '),
-            album: state.item.album.name,
-            coverUrl: state.item.album.images[0]?.url || EMPTY_TRACK.coverUrl,
-            duration: Math.round(state.durationMs / 1000),
-            source: 'spotify',
-            spotifyUri: state.item.uri,
-          };
+        const albumId = (state.item.album as any)?.id;
+        const spotifyTrack: Track = {
+          id: fetchedTrackId,
+          title: state.item.name,
+          artist: state.item.artists?.map((a) => a.name).join(', ') || 'Unknown Artist',
+          album: state.item.album?.name || '',
+          coverUrl: state.item.album?.images?.[0]?.url || EMPTY_TRACK.coverUrl,
+          duration: Math.round(state.durationMs / 1000),
+          source: 'spotify',
+          spotifyUri: state.item.uri,
+          spotifyAlbumId: albumId,
+        };
 
-          setCurrentTrack(spotifyTrack);
-          setIsPlaying(state.isPlaying);
-          setCurrentTime(Math.round(state.progressMs / 1000));
-          setDuration(Math.round(state.durationMs / 1000));
-          setActiveSource('spotify');
+        // Atomically update state
+        setCurrentTrack(spotifyTrack);
+        setIsPlaying(state.isPlaying);
+        setCurrentTime(Math.round(state.progressMs / 1000));
+        setDuration(Math.round(state.durationMs / 1000));
+        setActiveSource('spotify');
 
-          // Trigger Album Cover Color Extraction & Auto Theme Morphing
-          if (currentTrack.id !== spotifyTrack.id) {
-            updateGenreAndTheme(spotifyTrack);
-          }
+        // Trigger Album Cover Color Extraction & Auto Theme Morphing
+        if (currentTrack.id !== spotifyTrack.id) {
+          updateGenreAndTheme(spotifyTrack);
         }
       }, 1500);
     } else {
       SpotifyApiService.stopPlayerPolling();
-      setAlbums(DEMO_ALBUMS);
+      setAlbums([]);
     }
 
     return () => SpotifyApiService.stopPlayerPolling();
@@ -462,6 +409,10 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const connectSpotify = async () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+    }
     const clientId = (settings.spotifyClientId || '').trim() || localStorage.getItem('spotify_client_id')?.trim() || '';
     if (clientId) localStorage.setItem('spotify_client_id', clientId);
     const token = await SpotifyApiService.loginWithPopup(clientId);
@@ -481,7 +432,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setActiveSource('galactic');
   };
 
-  const playTrack = (track: Track) => {
+  const playTrack = (track: Track, contextUri?: string) => {
     optimisticTrackLockRef.current = { trackId: track.id, timestamp: Date.now() };
     setCurrentTrack(track);
     setCurrentTime(0);
@@ -496,8 +447,10 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
       setIsPlaying(true);
       setActiveSource('spotify');
-      SpotifyApiService.play(track.spotifyUri).catch(console.warn);
-    } else if ((track as any).audioUrl && audioRef.current) {
+
+      const targetContextUri = contextUri || (track.spotifyAlbumId ? `spotify:album:${track.spotifyAlbumId}` : undefined);
+      SpotifyApiService.play(track.spotifyUri, undefined, targetContextUri).catch(console.warn);
+    } else if (track.source === 'local' && (track as any).audioUrl && audioRef.current) {
       // Pause Spotify remote player to prevent dual audio streams playing
       SpotifyApiService.pause().catch(() => {});
       ensureAudioContext();
@@ -505,7 +458,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
       audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
       setActiveSource('local');
     } else {
-      // Demo/galactic track — no real audio
+      // Demo/galactic track — no real audio stream
       SpotifyApiService.pause().catch(() => {});
       if (audioRef.current) {
         audioRef.current.pause();
@@ -518,6 +471,10 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const togglePlayPause = () => {
     if (activeSource === 'spotify') {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
       if (isPlaying) {
         SpotifyApiService.pause().catch(console.warn);
         setIsPlaying(false);
@@ -525,7 +482,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
         SpotifyApiService.play().catch(console.warn);
         setIsPlaying(true);
       }
-    } else if (activeSource === 'local' && audioRef.current) {
+    } else if (activeSource === 'local' && audioRef.current && (currentTrack as any).audioUrl) {
       ensureAudioContext();
       if (isPlaying) {
         audioRef.current.pause();
@@ -533,25 +490,220 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
       } else {
         audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
       }
+    } else {
+      // Galactic/demo mode
+      setIsPlaying(!isPlaying);
     }
   };
 
-  const nextTrack = () => {
-    if (activeSource === 'spotify') {
-      SpotifyApiService.next().catch(console.warn);
-    } else if (queue.length > 0) {
+  const triggerSpotifyPollImmediately = () => {
+    optimisticTrackLockRef.current = null;
+    const fetchState = async () => {
+      const state = await SpotifyApiService.getPlaybackState();
+      console.log('[SKIP 8] PLAYER STATE\n' + JSON.stringify({
+        trackId: state?.item?.id || null,
+        trackName: state?.item?.name || null,
+        isPlaying: state?.isPlaying ?? false,
+        deviceId: state?.deviceId || null
+      }, null, 2));
+      if (state && state.item) {
+        const fetchedTrackId = `spotify:${state.item.id}`;
+        const spotifyTrack: Track = {
+          id: fetchedTrackId,
+          title: state.item.name,
+          artist: state.item.artists.map((a) => a.name).join(', '),
+          album: state.item.album.name,
+          coverUrl: state.item.album.images[0]?.url || EMPTY_TRACK.coverUrl,
+          duration: Math.round(state.durationMs / 1000),
+          source: 'spotify',
+          spotifyUri: state.item.uri,
+          spotifyAlbumId: (state.item.album as any)?.id,
+        };
+        const oldId = currentTrack.id;
+        const oldName = currentTrack.title;
+        setCurrentTrack(spotifyTrack);
+        console.log('[SKIP 9] CURRENT TRACK UPDATE\n' + JSON.stringify({
+          previousId: oldId,
+          newId: fetchedTrackId,
+          previousName: oldName,
+          newName: state.item.name
+        }, null, 2));
+        setIsPlaying(state.isPlaying);
+        setCurrentTime(Math.round(state.progressMs / 1000));
+        setDuration(Math.round(state.durationMs / 1000));
+        setActiveSource('spotify');
+      }
+    };
+    setTimeout(fetchState, 350);
+    setTimeout(fetchState, 900);
+  };
+
+  const nextTrack = async () => {
+    console.log('[NEXT 2] nextTrack ENTER\n' + JSON.stringify({
+      activeSource,
+      currentTrackId: currentTrack?.id,
+      spotifyUri: currentTrack?.spotifyUri,
+      isPlaying
+    }, null, 2));
+
+    // 1. If queue has items, play next queued track
+    if (queue.length > 0) {
       const next = queue[0];
       setQueue((prev) => prev.slice(1));
       playTrack(next);
+      return;
+    }
+
+    // 2. If Spotify is active, use Spotify Web API
+    if (activeSource === 'spotify' || isSpotifyConnected) {
+      console.log('[NEXT 3] CALLING SPOTIFY API');
+
+      // 1. CAPTURE STATE BEFORE NEXT
+      try {
+        const rawState = await SpotifyApiService.getRawPlaybackState();
+        const beforeObj = {
+          trackId: rawState?.item?.id || null,
+          trackUri: rawState?.item?.uri || null,
+          trackName: rawState?.item?.name || null,
+          progressMs: rawState?.progress_ms ?? null,
+          isPlaying: rawState?.is_playing ?? false,
+          device: rawState?.device ? {
+            id: rawState.device.id,
+            name: rawState.device.name,
+            type: rawState.device.type,
+            isActive: rawState.device.is_active,
+            isRestricted: rawState.device.is_restricted,
+          } : null,
+          context: rawState?.context ? {
+            type: rawState.context.type,
+            uri: rawState.context.uri,
+          } : null,
+          disallows: rawState?.actions?.disallows || rawState?.disallows || null,
+        };
+        console.log('[NEXT BEFORE]\n' + JSON.stringify(beforeObj, null, 2));
+      } catch (e: any) {
+        console.warn('[NEXT BEFORE CAPTURE FAILED]', e?.message || e);
+      }
+
+      // 2. SEND EXACTLY ONE NEXT REQUEST
+      try {
+        const res = await SpotifyApiService.next();
+        console.log('[NEXT RESPONSE]\n' + JSON.stringify({ status: 204, body: res }, null, 2));
+      } catch (err: any) {
+        console.error('[NEXT RESPONSE]\n' + JSON.stringify({ error: err?.message || String(err) }, null, 2));
+      }
+
+      // 3. VERIFY SPOTIFY (+250ms, +500ms, +1000ms, +2000ms)
+      const delays = [250, 500, 1000, 2000];
+      delays.forEach((delay) => {
+        setTimeout(async () => {
+          try {
+            const pollState = await SpotifyApiService.getRawPlaybackState();
+            const verifyObj = {
+              trackId: pollState?.item?.id || null,
+              trackUri: pollState?.item?.uri || null,
+              trackName: pollState?.item?.name || null,
+              progressMs: pollState?.progress_ms ?? null,
+              isPlaying: pollState?.is_playing ?? false,
+            };
+            console.log(`[NEXT VERIFY +${delay}ms]\n` + JSON.stringify(verifyObj, null, 2));
+          } catch (e: any) {
+            console.warn(`[NEXT VERIFY +${delay}ms FAILED]`, e?.message || e);
+          }
+        }, delay);
+      });
+      return;
+    }
+
+    // 3. For local/non-Spotify active source, navigate local albums list
+    let currentAlbumTracks: Track[] = [];
+    for (const alb of albums) {
+      const foundIdx = alb.tracks.findIndex(
+        (t) => t.id === currentTrack.id || (t.spotifyUri && t.spotifyUri === currentTrack.spotifyUri)
+      );
+      if (foundIdx !== -1) {
+        currentAlbumTracks = alb.tracks;
+        if (foundIdx < alb.tracks.length - 1) {
+          playTrack(alb.tracks[foundIdx + 1]);
+          return;
+        }
+        break;
+      }
+    }
+
+    if (currentAlbumTracks.length > 0) {
+      playTrack(currentAlbumTracks[0]);
     }
   };
 
-  const previousTrack = () => {
-    if (activeSource === 'spotify') {
-      SpotifyApiService.previous().catch(console.warn);
-    } else if (audioRef.current && currentTime > 3) {
-      audioRef.current.currentTime = 0;
-      setCurrentTime(0);
+  const previousTrack = async () => {
+    console.log('[PREV 2] previousTrack ENTER', {
+      activeSource,
+      currentTrackId: currentTrack?.id,
+      spotifyUri: currentTrack?.spotifyUri,
+      isPlaying,
+      currentTime
+    });
+    // 1. If track has played > 3 seconds, rewind to beginning
+    if (currentTime > 3) {
+      console.log('[PREV 2b] REWINDING (currentTime > 3)');
+      seekTo(0);
+      return;
+    }
+
+    // 2. If Spotify is active, use Spotify Web API
+    if (activeSource === 'spotify' || isSpotifyConnected) {
+      console.log('[PREV 3] CALLING SPOTIFY API');
+      try {
+        const rawState = await SpotifyApiService.getRawPlaybackState();
+        const diagnosticObject = {
+          device: rawState?.device ? {
+            id: rawState.device.id,
+            name: rawState.device.name,
+            type: rawState.device.type,
+            is_active: rawState.device.is_active,
+            is_restricted: rawState.device.is_restricted,
+          } : null,
+          context: rawState?.context ? {
+            type: rawState.context.type,
+            uri: rawState.context.uri,
+          } : null,
+          item: rawState?.item ? {
+            id: rawState.item.id,
+            uri: rawState.item.uri,
+            name: rawState.item.name,
+          } : null,
+          progress_ms: rawState?.progress_ms ?? null,
+          is_playing: rawState?.is_playing ?? false,
+          actions: {
+            disallows: rawState?.actions?.disallows || rawState?.disallows || null,
+          },
+        };
+        console.log('[PREV STATE CAPTURE]\n' + JSON.stringify(diagnosticObject, null, 2));
+      } catch (e: any) {
+        console.warn('[PREV STATE CAPTURE FAILED]', e?.message || e);
+      }
+
+      SpotifyApiService.previous().then(() => {
+        triggerSpotifyPollImmediately();
+      }).catch((err: any) => {
+        console.error('[PREV ERR]', err?.message || err);
+      });
+      return;
+    }
+
+    // 3. For local/non-Spotify active source, navigate local albums list
+    for (const alb of albums) {
+      const foundIdx = alb.tracks.findIndex(
+        (t) => t.id === currentTrack.id || (t.spotifyUri && t.spotifyUri === currentTrack.spotifyUri)
+      );
+      if (foundIdx !== -1) {
+        if (foundIdx > 0) {
+          playTrack(alb.tracks[foundIdx - 1]);
+          return;
+        }
+        break;
+      }
     }
   };
 

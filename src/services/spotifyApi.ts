@@ -19,9 +19,10 @@ export interface SpotifyPlayerState {
     id: string;
     name: string;
     artists: { name: string }[];
-    album: { name: string; images: { url: string }[] };
+    album: { id?: string; name: string; images: { url: string }[] };
     uri: string;
   } | null;
+  deviceId?: string;
 }
 
 export interface SpotifySearchTrackItem extends Track {
@@ -53,9 +54,21 @@ export interface OfficialSpotifySearchResult {
   artists: SpotifySearchArtistItem[];
 }
 
+export interface SpotifyAlbumFull {
+  id: string;
+  name: string;
+  artist: string;
+  coverUrl: string;
+  releaseYear: string;
+  totalTracks: number;
+  spotifyUri: string;
+  tracks: Track[];
+}
+
 export class SpotifyApiService {
   private static pollingTimer: number | null = null;
   private static searchCache = new Map<string, OfficialSpotifySearchResult>();
+  private static albumCache = new Map<string, SpotifyAlbumFull>();
 
   public static getRedirectUri(): string {
     const saved = localStorage.getItem('spotify_redirect_uri');
@@ -382,13 +395,19 @@ export class SpotifyApiService {
       },
     });
 
-    if (res.status === 204) return null;
+    if (res.status === 204 || res.status === 202) return null;
     if (!res.ok) {
       const errText = await res.text();
       throw new Error(`Spotify API error [${res.status}]: ${errText}`);
     }
 
-    return res.json();
+    const text = await res.text();
+    if (!text || !text.trim()) return null;
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return text;
+    }
   }
 
   public static async getUserProfile() {
@@ -399,15 +418,24 @@ export class SpotifyApiService {
     }
   }
 
+  public static async getRawPlaybackState(): Promise<any | null> {
+    try {
+      return await this.fetchApi('/me/player');
+    } catch (e) {
+      return null;
+    }
+  }
+
   public static async getPlaybackState(): Promise<SpotifyPlayerState | null> {
     try {
       const data = await this.fetchApi('/me/player');
-      if (!data) return null;
+      if (!data || typeof data !== 'object') return null;
       return {
         isPlaying: data.is_playing,
         progressMs: data.progress_ms || 0,
         durationMs: data.item?.duration_ms || 0,
         item: data.item,
+        deviceId: data.device?.id,
       };
     } catch (e) {
       return null;
@@ -435,14 +463,24 @@ export class SpotifyApiService {
     }
   }
 
-  public static async play(spotifyUri?: string) {
+  public static async play(spotifyUri?: string, positionMs?: number, contextUri?: string) {
     const body: Record<string, unknown> = {};
-    if (spotifyUri) {
+    if (contextUri) {
+      body.context_uri = contextUri;
+      if (spotifyUri && spotifyUri.includes(':track:')) {
+        body.offset = { uri: spotifyUri };
+      }
+      console.log('[SPOTIFY PLAY BODY (CONTEXT)]\n' + JSON.stringify(body, null, 2));
+    } else if (spotifyUri) {
       if (spotifyUri.includes(':track:')) {
         body.uris = [spotifyUri];
+        if (positionMs && positionMs > 0) {
+          body.position_ms = Math.floor(positionMs);
+        }
       } else {
         body.context_uri = spotifyUri;
       }
+      console.log('[SPOTIFY PLAY BODY (URIS)]\n' + JSON.stringify(body, null, 2));
     }
     try {
       return await this.fetchApi('/me/player/play', {
@@ -452,6 +490,32 @@ export class SpotifyApiService {
     } catch (err: any) {
       console.warn('Spotify play request notice:', err);
       if (err.message?.includes('404')) {
+        // Device inactive or no active player — attempt device discovery & transfer
+        try {
+          const devices = await this.getAvailableDevices();
+          if (devices && devices.length > 0) {
+            const targetDevice = devices.find((d: any) => d.is_active) || devices[0];
+            if (targetDevice?.id) {
+              await this.fetchApi('/me/player', {
+                method: 'PUT',
+                body: JSON.stringify({ device_ids: [targetDevice.id], play: true }),
+              });
+              return;
+            }
+          }
+        } catch (devErr) {
+          console.warn('Failed to auto-transfer playback to available device:', devErr);
+        }
+
+        if (spotifyUri) {
+          try {
+            return await this.fetchApi('/me/player/play', {
+              method: 'PUT',
+              body: JSON.stringify(body),
+            });
+          } catch (e) {}
+        }
+
         alert('Spotify Remote Notice:\nNo active Spotify device detected. Please open the Spotify App on your computer or phone and start playing a track to connect playback.');
       } else if (err.message?.includes('403')) {
         alert('Spotify Remote Notice:\nRemote playback control requires an active Spotify player or Spotify Premium account.');
@@ -465,11 +529,24 @@ export class SpotifyApiService {
   }
 
   public static async next() {
-    return this.fetchApi('/me/player/next', { method: 'POST' });
+    console.log('[NEXT 4] SERVICE ENTER');
+    console.log('[NEXT 5] REQUEST', { method: 'POST', endpoint: '/v1/me/player/next' });
+    const res = await this.fetchApi('/me/player/next', { method: 'POST' });
+    console.log('[NEXT 7] SPOTIFY ACCEPTED NEXT');
+    return res;
   }
 
   public static async previous() {
-    return this.fetchApi('/me/player/previous', { method: 'POST' });
+    console.log('[PREV 4] SERVICE ENTER');
+    console.log('[PREV 5] REQUEST: POST /v1/me/player/previous');
+    try {
+      const res = await this.fetchApi('/me/player/previous', { method: 'POST' });
+      console.log('[PREV 7] SPOTIFY ACCEPTED PREVIOUS');
+      return res;
+    } catch (err: any) {
+      console.error('[PREV HTTP ERROR]', err?.message || err);
+      throw err;
+    }
   }
 
   public static async seek(positionMs: number) {
@@ -505,6 +582,7 @@ export class SpotifyApiService {
       duration: Math.round((item.duration_ms || 0) / 1000),
       source: 'spotify' as const,
       spotifyUri: item.uri,
+      spotifyAlbumId: item.album?.id,
       explicit: Boolean(item.explicit),
       externalUrl: item.external_urls?.spotify,
     }));
@@ -559,6 +637,7 @@ export class SpotifyApiService {
           duration: Math.round(item.track.duration_ms / 1000),
           source: 'spotify' as const,
           spotifyUri: item.track.uri,
+          spotifyAlbumId: item.track.album?.id,
         }));
     } catch (err) {
       console.warn('Failed to load user saved tracks from Spotify:', err);
@@ -582,6 +661,7 @@ export class SpotifyApiService {
           duration: Math.round(item.track.duration_ms / 1000),
           source: 'spotify' as const,
           spotifyUri: item.track.uri,
+          spotifyAlbumId: item.track.album?.id,
         }));
     } catch (err) {
       console.warn(`Failed to load tracks for playlist ${playlistId}:`, err);
@@ -620,6 +700,53 @@ export class SpotifyApiService {
       return data?.devices || [];
     } catch (e) {
       return [];
+    }
+  }
+
+  public static async getAlbum(albumId: string): Promise<SpotifyAlbumFull | null> {
+    if (!albumId) return null;
+    const cleanId = albumId.replace(/^spotify:album:/, '');
+    if (this.albumCache.has(cleanId)) {
+      return this.albumCache.get(cleanId)!;
+    }
+
+    try {
+      const data = await this.fetchApi(`/albums/${cleanId}`);
+      if (!data) return null;
+
+      const tracks: Track[] = (data.tracks?.items || []).map((item: any) => ({
+        id: `spotify:${item.id}`,
+        title: item.name,
+        artist: item.artists?.map((a: any) => a.name).join(', ') || data.artists?.[0]?.name || 'Unknown Artist',
+        album: data.name,
+        coverUrl: data.images?.[0]?.url || '/cover1.png',
+        duration: Math.round((item.duration_ms || 0) / 1000),
+        source: 'spotify' as const,
+        spotifyUri: item.uri,
+        spotifyAlbumId: cleanId,
+      }));
+
+      const albumObj: SpotifyAlbumFull = {
+        id: cleanId,
+        name: data.name,
+        artist: data.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+        coverUrl: data.images?.[0]?.url || '/cover1.png',
+        releaseYear: data.release_date ? data.release_date.substring(0, 4) : '',
+        totalTracks: data.total_tracks || tracks.length,
+        spotifyUri: data.uri,
+        tracks,
+      };
+
+      if (this.albumCache.size >= 50) {
+        const firstKey = this.albumCache.keys().next().value;
+        if (firstKey) this.albumCache.delete(firstKey);
+      }
+      this.albumCache.set(cleanId, albumObj);
+
+      return albumObj;
+    } catch (err) {
+      console.warn(`Failed to fetch Spotify album ${cleanId}:`, err);
+      return null;
     }
   }
 }

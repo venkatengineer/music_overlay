@@ -6,6 +6,7 @@ import { TrackInfoDisplay } from './TrackInfoDisplay';
 import { PlaybackControls } from './PlaybackControls';
 import { AlbumDrawer } from './AlbumDrawer';
 import { GalacticSearch } from './GalacticSearch';
+import { CurrentAlbumPanel } from './CurrentAlbumPanel';
 import { QueueDrawer } from './QueueDrawer';
 import { SettingsModal } from './SettingsModal';
 import { ArchitectureDocsModal } from '../docs/ArchitectureDocsModal';
@@ -237,9 +238,10 @@ export const HUDContainer: React.FC = () => {
             <PlaybackControls />
           </div>
 
-          {/* Right Column: Search, Albums/Playlists Archive, Queue */}
+          {/* Right Column: Search, Current Album Panel, Albums/Playlists Archive, Queue */}
           <div className="lg:col-span-7 flex flex-col space-y-4 p-5 rounded-3xl bg-black/40 border border-white/10">
             <GalacticSearch />
+            <CurrentAlbumPanel />
             <AlbumDrawer />
             <QueueDrawer />
           </div>
@@ -249,8 +251,9 @@ export const HUDContainer: React.FC = () => {
           <Holo3DDisc />
           <TrackInfoDisplay />
           <PlaybackControls />
-          <AlbumDrawer />
           <GalacticSearch />
+          <CurrentAlbumPanel />
+          <AlbumDrawer />
           <QueueDrawer />
         </div>
       )}

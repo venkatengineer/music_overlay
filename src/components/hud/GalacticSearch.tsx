@@ -118,8 +118,14 @@ export const GalacticSearch: React.FC = () => {
     results &&
     (results.tracks.length > 0 || results.albums.length > 0 || results.artists.length > 0);
 
+  const ensureMouseInteractive = () => {
+    if ((window as any).electronAPI?.setIgnoreMouseEvents) {
+      (window as any).electronAPI.setIgnoreMouseEvents(false);
+    }
+  };
+
   return (
-    <div className="relative w-full px-2 my-2 z-30">
+    <div className="relative w-full px-2 my-2 z-30" onMouseEnter={ensureMouseInteractive}>
       {/* Search Input Bar */}
       <div
         onClick={handleIconClick}
@@ -144,7 +150,10 @@ export const GalacticSearch: React.FC = () => {
           ref={inputRef}
           type="text"
           value={query}
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            ensureMouseInteractive();
+            setIsOpen(true);
+          }}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search the Galactic Archive..."
           className="w-full bg-transparent border-none outline-none font-rajdhani text-sm text-slate-100 placeholder-slate-400 tracking-wide"

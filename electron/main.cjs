@@ -138,6 +138,11 @@ async function createWindow() {
 
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
+  mainWindow.webContents.on('console-message', (_event, _level, message) => {
+    if (message.includes('Third-party cookie') || message.includes('Electron Security Warning')) return;
+    console.log('[RENDERER LOG]', message);
+  });
+
   // Configure popup handler so Spotify Auth popup floats ON TOP of screen-saver overlay
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log('[LOG] Intercepted window.open request for URL:', url);
@@ -306,3 +311,5 @@ ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
     win.setIgnoreMouseEvents(ignore, options || { forward: true });
   }
 });
+
+

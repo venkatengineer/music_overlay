@@ -69,6 +69,7 @@ export const PlaybackControls: React.FC = () => {
       <button
         onClick={(e) => {
           triggerRipple(e);
+          console.log('[PREV 1] BUTTON CLICK');
           previousTrack();
         }}
         className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1"
@@ -104,6 +105,7 @@ export const PlaybackControls: React.FC = () => {
       <button
         onClick={(e) => {
           triggerRipple(e);
+          console.log('[NEXT 1] BUTTON CLICK');
           nextTrack();
         }}
         className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1"

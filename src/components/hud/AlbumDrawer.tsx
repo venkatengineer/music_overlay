@@ -68,7 +68,7 @@ export const AlbumDrawer: React.FC = () => {
                 return (
                   <div
                     key={track.id}
-                    onClick={() => playTrack(track)}
+                    onClick={() => playTrack(track, activeAlbum.id ? (activeAlbum.id.startsWith('spotify:') ? activeAlbum.id : `spotify:album:${activeAlbum.id}`) : undefined)}
                     className="flex items-center justify-between p-2 rounded-lg text-xs font-rajdhani cursor-pointer transition-all duration-200 hover:translate-x-1 border"
                     style={{
                       borderColor: isActive ? `${themeConfig.primary}50` : 'transparent',

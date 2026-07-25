@@ -18,11 +18,6 @@ export const QueueDrawer: React.FC = () => {
             (window as any).electronAPI.setIgnoreMouseEvents(false);
           }
         }}
-        onMouseLeave={() => {
-          if (!isOpen && (window as any).electronAPI?.setIgnoreMouseEvents) {
-            (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
-          }
-        }}
         className="fixed top-1/2 right-2 -translate-y-1/2 p-2.5 rounded-l-2xl alien-glass border-l border-t border-b border-white/10 hover:text-white shadow-2xl transition-all duration-300 z-40 hover:scale-105"
         style={{ color: themeConfig.primary }}
         title="Toggle Upcoming Queue"
@@ -36,11 +31,6 @@ export const QueueDrawer: React.FC = () => {
           onMouseEnter={() => {
             if ((window as any).electronAPI?.setIgnoreMouseEvents) {
               (window as any).electronAPI.setIgnoreMouseEvents(false);
-            }
-          }}
-          onMouseLeave={() => {
-            if ((window as any).electronAPI?.setIgnoreMouseEvents) {
-              (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
             }
           }}
           className="fixed top-0 right-0 h-full w-80 alien-glass border-l border-white/10 p-4 shadow-2xl z-50 animate-in slide-in-from-right duration-300 flex flex-col"

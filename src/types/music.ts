@@ -10,6 +10,7 @@ export interface Track {
   audioUrl?: string; // URL or blob for web audio playback
   source: 'spotify' | 'galactic' | 'local';
   spotifyUri?: string;
+  spotifyAlbumId?: string;
   genre?: string;
 }
 
