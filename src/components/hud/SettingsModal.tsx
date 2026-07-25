@@ -5,7 +5,7 @@ import { Settings, X, Sliders, Palette, LogIn, LogOut, Upload, Key, CheckCircle2
 import { ThemeId } from '../../types/music';
 
 export const SettingsModal: React.FC = () => {
-  const { settings, updateSettings } = useThemeSettings();
+  const { settings, updateSettings, themeConfig } = useThemeSettings();
   const { loadLocalFile, isSpotifyConnected, connectSpotify, disconnectSpotify, spotifyUserDisplayName } = useAudioEngine();
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [spotifyIdInput, setSpotifyIdInput] = useState<string>(settings.spotifyClientId || localStorage.getItem('spotify_client_id') || 'b977c4d20ba7494a8dea2a61285e84ce');
@@ -44,17 +44,31 @@ export const SettingsModal: React.FC = () => {
     <>
       <button
         onClick={() => setIsOpen(true)}
-        className="p-2 rounded-full alien-glass text-slate-300 hover:text-emerald-400 border border-white/10 hover:border-emerald-400/40 shadow-lg transition-all hover:rotate-90 duration-300"
+        className="p-2 rounded-full alien-glass text-slate-300 border border-white/10 shadow-lg transition-all hover:rotate-90 duration-300"
+        style={{ color: themeConfig.primary }}
         title="Alien OS Control Settings"
       >
         <Settings className="w-4 h-4" />
       </button>
 
       {isOpen && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
-          <div className="w-full max-w-md alien-glass border border-emerald-500/30 rounded-3xl p-6 shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto">
+        <div
+          onMouseEnter={() => {
+            if ((window as any).electronAPI?.setIgnoreMouseEvents) {
+              (window as any).electronAPI.setIgnoreMouseEvents(false);
+            }
+          }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 z-50 animate-in fade-in duration-200"
+        >
+          <div
+            className="w-full max-w-md alien-glass border rounded-3xl p-6 shadow-2xl space-y-5 max-h-[85vh] overflow-y-auto"
+            style={{ borderColor: `${themeConfig.primary}50` }}
+          >
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-white/10 font-orbitron text-sm text-emerald-400">
+            <div
+              className="flex items-center justify-between pb-3 border-b border-white/10 font-orbitron text-sm font-bold"
+              style={{ color: themeConfig.primary }}
+            >
               <span className="flex items-center space-x-2">
                 <Sliders className="w-4 h-4" />
                 <span>GALACTIC SYSTEM SETTINGS</span>
@@ -70,27 +84,32 @@ export const SettingsModal: React.FC = () => {
             {/* Section 1: Themes */}
             <div className="space-y-2">
               <label className="flex items-center space-x-2 font-mono text-xs text-slate-300">
-                <Palette className="w-3.5 h-3.5 text-emerald-400" />
+                <Palette className="w-3.5 h-3.5" style={{ color: themeConfig.primary }} />
                 <span>ALIEN INTERFACE SKINS</span>
               </label>
               <div className="grid grid-cols-2 gap-2">
-                {Object.values(THEME_CONFIGS).map((t) => (
-                  <button
-                    key={t.id}
-                    onClick={() => updateSettings({ theme: t.id as ThemeId })}
-                    className={`flex items-center space-x-2 p-2.5 rounded-xl border text-xs font-rajdhani font-semibold transition-all ${
-                      settings.theme === t.id
-                        ? 'border-emerald-400 bg-emerald-500/20 text-white shadow-alien-glow'
-                        : 'border-white/10 bg-black/30 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <span
-                      className="w-3.5 h-3.5 rounded-full"
-                      style={{ backgroundColor: t.primary, boxShadow: `0 0 6px ${t.primary}` }}
-                    />
-                    <span>{t.name}</span>
-                  </button>
-                ))}
+                {Object.values(THEME_CONFIGS).map((t) => {
+                  const isSelected = settings.theme === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      onClick={() => updateSettings({ theme: t.id as ThemeId })}
+                      className="flex items-center space-x-2 p-2.5 rounded-xl border text-xs font-rajdhani font-semibold transition-all"
+                      style={{
+                        borderColor: isSelected ? t.primary : 'rgba(255,255,255,0.1)',
+                        backgroundColor: isSelected ? `${t.primary}25` : 'rgba(0,0,0,0.3)',
+                        color: isSelected ? '#ffffff' : '#94a3b8',
+                        boxShadow: isSelected ? `0 0 12px ${t.primary}50` : 'none',
+                      }}
+                    >
+                      <span
+                        className="w-3.5 h-3.5 rounded-full"
+                        style={{ backgroundColor: t.primary, boxShadow: `0 0 6px ${t.primary}` }}
+                      />
+                      <span>{t.name}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -100,9 +119,12 @@ export const SettingsModal: React.FC = () => {
                 <span>GENRE AUTO-MORPH THEMES:</span>
                 <button
                   onClick={() => updateSettings({ autoMorphGenreTheme: !settings.autoMorphGenreTheme })}
-                  className={`px-3 py-1 rounded-lg text-xs font-semibold ${
-                    settings.autoMorphGenreTheme ? 'bg-emerald-500/30 text-emerald-300 border border-emerald-500/50' : 'bg-slate-800 text-slate-400'
-                  }`}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold border transition-all"
+                  style={{
+                    backgroundColor: settings.autoMorphGenreTheme ? `${themeConfig.primary}25` : 'rgba(30,41,59,0.8)',
+                    borderColor: settings.autoMorphGenreTheme ? themeConfig.primary : 'transparent',
+                    color: settings.autoMorphGenreTheme ? themeConfig.primary : '#94a3b8',
+                  }}
                 >
                   {settings.autoMorphGenreTheme ? 'ENABLED' : 'DISABLED'}
                 </button>
@@ -111,7 +133,7 @@ export const SettingsModal: React.FC = () => {
               <div>
                 <div className="flex justify-between mb-1">
                   <span>BACKDROP TRANSPARENCY:</span>
-                  <span className="text-emerald-400">{Math.round(settings.transparency * 100)}%</span>
+                  <span style={{ color: themeConfig.primary }}>{Math.round(settings.transparency * 100)}%</span>
                 </div>
                 <input
                   type="range"
@@ -120,14 +142,15 @@ export const SettingsModal: React.FC = () => {
                   step="0.01"
                   value={settings.transparency}
                   onChange={(e) => updateSettings({ transparency: parseFloat(e.target.value) })}
-                  className="w-full accent-emerald-400 cursor-pointer bg-slate-800 rounded"
+                  className="w-full cursor-pointer bg-slate-800 rounded"
+                  style={{ accentColor: themeConfig.primary }}
                 />
               </div>
 
               <div>
                 <div className="flex justify-between mb-1">
                   <span>HOLOGRAPHIC GLOW INTENSITY:</span>
-                  <span className="text-emerald-400">{settings.glowIntensity.toFixed(1)}x</span>
+                  <span style={{ color: themeConfig.secondary }}>{settings.glowIntensity.toFixed(1)}x</span>
                 </div>
                 <input
                   type="range"
@@ -136,21 +159,25 @@ export const SettingsModal: React.FC = () => {
                   step="0.1"
                   value={settings.glowIntensity}
                   onChange={(e) => updateSettings({ glowIntensity: parseFloat(e.target.value) })}
-                  className="w-full accent-cyan-400 cursor-pointer bg-slate-800 rounded"
+                  className="w-full cursor-pointer bg-slate-800 rounded"
+                  style={{ accentColor: themeConfig.secondary }}
                 />
               </div>
             </div>
 
             {/* Section 3: Spotify Web API OAuth Configuration */}
-            <div className="p-3.5 rounded-2xl bg-black/40 border border-emerald-500/40 space-y-2.5">
-              <div className="flex items-center justify-between font-orbitron text-xs text-emerald-400">
+            <div
+              className="p-3.5 rounded-2xl bg-black/40 border space-y-2.5"
+              style={{ borderColor: `${themeConfig.primary}40` }}
+            >
+              <div className="flex items-center justify-between font-orbitron text-xs font-semibold" style={{ color: themeConfig.primary }}>
                 <span className="flex items-center space-x-1.5">
                   <Key className="w-3.5 h-3.5" />
                   <span>SPOTIFY WEB API SETUP</span>
                 </span>
                 {isSpotifyConnected && (
-                  <span className="flex items-center space-x-1 text-[10px] text-emerald-300">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                  <span className="flex items-center space-x-1 text-[10px]" style={{ color: themeConfig.primary }}>
+                    <CheckCircle2 className="w-3 h-3" style={{ color: themeConfig.primary }} />
                     <span>AUTHENTICATED</span>
                   </span>
                 )}
@@ -159,7 +186,7 @@ export const SettingsModal: React.FC = () => {
               {isSpotifyConnected ? (
                 <div className="space-y-2">
                   <p className="text-xs text-slate-300 font-rajdhani">
-                    Connected as: <strong className="text-emerald-400">{spotifyUserDisplayName || 'Spotify User'}</strong>
+                    Connected as: <strong style={{ color: themeConfig.primary }}>{spotifyUserDisplayName || 'Spotify User'}</strong>
                   </p>
                   <button
                     onClick={disconnectSpotify}
@@ -181,7 +208,8 @@ export const SettingsModal: React.FC = () => {
                       placeholder="Paste Spotify Client ID here..."
                       value={spotifyIdInput}
                       onChange={(e) => setSpotifyIdInput(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-xl bg-black/60 border border-emerald-500/40 font-mono text-xs text-white placeholder-slate-600 focus:border-emerald-400 outline-none mt-0.5"
+                      className="w-full px-3 py-1.5 rounded-xl bg-black/60 border font-mono text-xs text-white placeholder-slate-600 outline-none mt-0.5"
+                      style={{ borderColor: `${themeConfig.primary}40` }}
                     />
                   </div>
 
@@ -190,7 +218,8 @@ export const SettingsModal: React.FC = () => {
                     <select
                       value={redirectUriInput}
                       onChange={(e) => setRedirectUriInput(e.target.value)}
-                      className="w-full px-3 py-1.5 rounded-xl bg-black/80 border border-emerald-500/40 font-mono text-xs text-emerald-300 focus:border-emerald-400 outline-none mt-0.5"
+                      className="w-full px-3 py-1.5 rounded-xl bg-black/80 border font-mono text-xs outline-none mt-0.5"
+                      style={{ borderColor: `${themeConfig.primary}40`, color: themeConfig.primary }}
                     >
                       {typeof window !== 'undefined' && window.location.protocol.startsWith('http') && (
                         <option value={window.location.origin.endsWith('/') ? window.location.origin : `${window.location.origin}/`}>
@@ -206,7 +235,12 @@ export const SettingsModal: React.FC = () => {
 
                   <button
                     onClick={handleSpotifyConnect}
-                    className="w-full py-2.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400 text-emerald-300 font-mono text-xs flex items-center justify-center space-x-2 transition-all shadow-alien-glow"
+                    className="w-full py-2.5 rounded-xl font-mono text-xs flex items-center justify-center space-x-2 transition-all border shadow-alien-glow"
+                    style={{
+                      borderColor: themeConfig.primary,
+                      backgroundColor: `${themeConfig.primary}25`,
+                      color: themeConfig.primary,
+                    }}
                   >
                     <LogIn className="w-4 h-4" />
                     <span>AUTHORIZE SPOTIFY LOGIN</span>
@@ -214,20 +248,27 @@ export const SettingsModal: React.FC = () => {
 
                   <button
                     onClick={() => setShowGuide(!showGuide)}
-                    className="w-full flex items-center justify-center space-x-1 text-[11px] text-cyan-400 hover:underline pt-1"
+                    className="w-full flex items-center justify-center space-x-1 text-[11px] hover:underline pt-1"
+                    style={{ color: themeConfig.secondary }}
                   >
                     <HelpCircle className="w-3 h-3" />
                     <span>How to get your free Spotify Client ID?</span>
                   </button>
 
                   {showGuide && (
-                    <div className="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 font-rajdhani text-xs text-slate-300 space-y-1.5 animate-in fade-in">
-                      <div className="font-bold text-cyan-300">Quick 3-Step Setup Guide:</div>
+                    <div
+                      className="p-3 rounded-xl bg-black/60 border font-rajdhani text-xs text-slate-300 space-y-1.5 animate-in fade-in"
+                      style={{ borderColor: `${themeConfig.secondary}40` }}
+                    >
+                      <div className="font-bold" style={{ color: themeConfig.secondary }}>Quick 3-Step Setup Guide:</div>
                       <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-300">
-                        <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" className="text-cyan-400 underline font-mono inline-flex items-center gap-0.5">developer.spotify.com/dashboard <ExternalLink className="w-3 h-3" /></a></li>
+                        <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer" className="underline font-mono inline-flex items-center gap-0.5" style={{ color: themeConfig.secondary }}>developer.spotify.com/dashboard <ExternalLink className="w-3 h-3" /></a></li>
                         <li>Click <strong>Create App</strong> (or select an existing App) and click <strong>Edit Settings</strong>.</li>
                         <li>Under <strong>Redirect URIs</strong>, add this EXACT link:
-                          <div className="my-1 font-mono text-[11px] text-emerald-300 bg-black/60 p-2 rounded border border-emerald-500/40 select-all font-semibold">
+                          <div
+                            className="my-1 font-mono text-[11px] bg-black/80 p-2 rounded border select-all font-semibold"
+                            style={{ borderColor: `${themeConfig.primary}50`, color: themeConfig.primary }}
+                          >
                             {redirectUriInput}
                           </div>
                         </li>
@@ -242,10 +283,17 @@ export const SettingsModal: React.FC = () => {
             {/* Section 4: Local Audio Upload */}
             <div className="p-3.5 rounded-2xl bg-black/40 border border-white/10 space-y-2">
               <span className="font-mono text-xs text-slate-300 flex items-center space-x-1.5">
-                <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                <Upload className="w-3.5 h-3.5" style={{ color: themeConfig.secondary }} />
                 <span>PLAY LOCAL AUDIO FILE</span>
               </span>
-              <label className="block w-full text-center py-2 px-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 font-mono text-xs cursor-pointer transition-all">
+              <label
+                className="block w-full text-center py-2 px-4 rounded-xl border font-mono text-xs cursor-pointer transition-all"
+                style={{
+                  borderColor: `${themeConfig.secondary}40`,
+                  backgroundColor: `${themeConfig.secondary}15`,
+                  color: themeConfig.secondary,
+                }}
+              >
                 <span>SELECT AUDIO FILE (MP3 / WAV / FLAC)</span>
                 <input type="file" accept="audio/*" onChange={handleFileUpload} className="hidden" />
               </label>
@@ -256,3 +304,4 @@ export const SettingsModal: React.FC = () => {
     </>
   );
 };
+

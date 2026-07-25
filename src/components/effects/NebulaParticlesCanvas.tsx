@@ -18,6 +18,12 @@ export const NebulaParticlesCanvas: React.FC = () => {
   const { audioMetrics, isPlaying } = useAudioEngine();
   const { themeConfig, settings } = useThemeSettings();
 
+  // Store volatile data in refs so the RAF loop can read them without triggering re-mount
+  const metricsRef = useRef(audioMetrics);
+  const playingRef = useRef(isPlaying);
+  metricsRef.current = audioMetrics;
+  playingRef.current = isPlaying;
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -60,7 +66,7 @@ export const NebulaParticlesCanvas: React.FC = () => {
 
       // 1. Draw Nebula Atmospheric Fog (Glow gradient)
       fogPhase += 0.005;
-      const bassEnergy = audioMetrics.bass * (isPlaying ? 1 : 0.2);
+      const bassEnergy = metricsRef.current.bass * (playingRef.current ? 1 : 0.2);
       const fogRadius = Math.max(width, height) * (0.6 + bassEnergy * 0.2);
 
       const nebulaGrad = ctx.createRadialGradient(
@@ -99,14 +105,12 @@ export const NebulaParticlesCanvas: React.FC = () => {
         ctx.arc(p.x, p.y, dynamicSize, 0, Math.PI * 2);
         ctx.fillStyle = p.color;
         ctx.globalAlpha = dynamicAlpha;
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 8 * settings.glowIntensity;
         ctx.fill();
         ctx.restore();
       });
 
       // 3. Ambient Drifting Energy Ring Wave
-      if (isPlaying) {
+      if (playingRef.current) {
         ctx.save();
         ctx.beginPath();
         ctx.arc(width / 2, height * 0.35, 180 + bassEnergy * 40, 0, Math.PI * 2);
@@ -127,7 +131,7 @@ export const NebulaParticlesCanvas: React.FC = () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animId);
     };
-  }, [themeConfig, settings, audioMetrics, isPlaying]);
+  }, [themeConfig, settings]);
 
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />;
 };

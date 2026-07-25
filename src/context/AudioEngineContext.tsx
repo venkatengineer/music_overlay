@@ -1,8 +1,19 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { Track, Album, AudioMetrics } from '../types/music';
 import { SpotifyApiService, SpotifyPlayerState } from '../services/spotifyApi';
 import { GenreDetectionEngine, GenreThemeMapping, GENRE_MAPPINGS } from '../services/genreEngine';
 import { useThemeSettings } from './ThemeSettingsContext';
+
+// Empty track placeholder — shown when no Spotify track is loaded yet
+export const EMPTY_TRACK: Track = {
+  id: 'empty',
+  title: 'Connect Spotify to Play',
+  artist: 'No track selected',
+  album: '',
+  coverUrl: '/cover1.png',
+  duration: 0,
+  source: 'galactic',
+};
 
 export const GALACTIC_TRACKS: Track[] = [
   {
@@ -10,40 +21,44 @@ export const GALACTIC_TRACKS: Track[] = [
     title: 'Aetheris Horizon',
     artist: 'Xenon Core',
     album: 'Orion Sector VII',
-    coverUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover1.png',
     duration: 214,
     source: 'galactic',
     genre: 'ambient',
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
   },
   {
     id: 'gal-2',
     title: 'Quantum Synth Cyberpunk',
     artist: 'Cybernetic Echoes',
     album: 'Matrix Core',
-    coverUrl: 'https://images.unsplash.com/photo-1508739773434-c26b3d09e071?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover2.png',
     duration: 185,
     source: 'galactic',
     genre: 'synthwave',
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
   },
   {
     id: 'gal-3',
-    title: 'Vortex Metal Distortion',
+    title: 'Vortex Industrial',
     artist: 'Rage Protocol',
     album: 'Heavy Industrial',
-    coverUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover3.png',
     duration: 240,
     source: 'galactic',
     genre: 'metal',
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3',
   },
   {
     id: 'gal-4',
     title: 'Solar Acoustic Jazz',
     artist: 'Nebula Weaver',
     album: 'Amber Lounge',
-    coverUrl: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover1.png',
     duration: 298,
     source: 'galactic',
     genre: 'jazz',
+    audioUrl: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
   },
 ];
 
@@ -52,7 +67,7 @@ export const DEMO_ALBUMS: Album[] = [
     id: 'alb-1',
     title: 'Orion Sector VII',
     artist: 'Xenon Core',
-    coverUrl: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover1.png',
     year: '3042',
     tracks: [GALACTIC_TRACKS[0], GALACTIC_TRACKS[1]],
   },
@@ -60,7 +75,7 @@ export const DEMO_ALBUMS: Album[] = [
     id: 'alb-2',
     title: 'Zero-G Transmissions',
     artist: 'Vortex Protocol',
-    coverUrl: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=600&auto=format&fit=crop&q=80',
+    coverUrl: '/cover2.png',
     year: '3044',
     tracks: [GALACTIC_TRACKS[2], GALACTIC_TRACKS[3]],
   },
@@ -115,8 +130,8 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isShuffle, setIsShuffle] = useState<boolean>(false);
   const [isRepeat, setIsRepeat] = useState<boolean>(false);
-  const [queue, setQueue] = useState<Track[]>([GALACTIC_TRACKS[1], GALACTIC_TRACKS[2], GALACTIC_TRACKS[3]]);
-  const [albums] = useState<Album[]>(DEMO_ALBUMS);
+  const [queue, setQueue] = useState<Track[]>([GALACTIC_TRACKS[1], GALACTIC_TRACKS[2]]);
+  const [albums, setAlbums] = useState<Album[]>(DEMO_ALBUMS);
   const [activeSource, setActiveSource] = useState<'galactic' | 'spotify' | 'local'>('galactic');
 
   const [genreMapping, setGenreMapping] = useState<GenreThemeMapping>(GENRE_MAPPINGS.ambient);
@@ -170,6 +185,15 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     SpotifyApiService.checkAndHandleCallback();
   }, []);
 
+  // Log visibility changes without stopping background music
+  useEffect(() => {
+    if ((window as any).electronAPI?.onWindowVisibilityChanged) {
+      (window as any).electronAPI.onWindowVisibilityChanged((isVisible: boolean) => {
+        console.log('[AUDIO ENGINE] Window visibility changed:', isVisible);
+      });
+    }
+  }, []);
+
   // Listen for Spotify Auth Code from IPC (Electron) or postMessage (Browser Popup)
   useEffect(() => {
     const handleAuthCode = async (code: string) => {
@@ -199,12 +223,39 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     };
   }, [settings.spotifyClientId]);
 
-  // Spotify Live Player Polling Engine
+  // Spotify Live Player Polling & Music Library Sync Engine
   useEffect(() => {
     if (isSpotifyConnected) {
       SpotifyApiService.getUserProfile().then((profile) => {
         if (profile?.display_name) setSpotifyUserDisplayName(profile.display_name);
       });
+
+      // Load user's Spotify Liked Songs & Playlists into Archive Albums
+      Promise.all([
+        SpotifyApiService.getUserSavedTracks(30),
+        SpotifyApiService.getUserPlaylistsWithTracks(),
+      ]).then(([savedTracks, playlistAlbums]) => {
+        const spotifyAlbums: Album[] = [];
+
+        if (savedTracks.length > 0) {
+          spotifyAlbums.push({
+            id: 'spotify-liked-songs',
+            title: '💚 Spotify Liked Songs',
+            artist: spotifyUserDisplayName || 'Spotify Library',
+            coverUrl: savedTracks[0]?.coverUrl || EMPTY_TRACK.coverUrl,
+            tracks: savedTracks,
+          });
+        }
+
+        if (playlistAlbums.length > 0) {
+          spotifyAlbums.push(...playlistAlbums);
+        }
+
+        if (spotifyAlbums.length > 0) {
+          console.log(`[AUDIO ENGINE] Loaded ${spotifyAlbums.length} Spotify collections into archive albums!`);
+          setAlbums([...spotifyAlbums, ...DEMO_ALBUMS]);
+        }
+      }).catch((err) => console.warn('[AUDIO ENGINE] Error loading Spotify library:', err));
 
       SpotifyApiService.startPlayerPolling((state: SpotifyPlayerState | null) => {
         if (state && state.item) {
@@ -213,7 +264,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
             title: state.item.name,
             artist: state.item.artists.map((a) => a.name).join(', '),
             album: state.item.album.name,
-            coverUrl: state.item.album.images[0]?.url || GALACTIC_TRACKS[0].coverUrl,
+            coverUrl: state.item.album.images[0]?.url || EMPTY_TRACK.coverUrl,
             duration: Math.round(state.durationMs / 1000),
             source: 'spotify',
             spotifyUri: state.item.uri,
@@ -235,6 +286,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }, 1500);
     } else {
       SpotifyApiService.stopPlayerPolling();
+      setAlbums(DEMO_ALBUMS);
     }
 
     return () => SpotifyApiService.stopPlayerPolling();
@@ -309,77 +361,43 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  // Continuous animation loop computing Audio Metrics at 144 FPS
+  // Audio metrics RAF loop — ONLY runs when isPlaying=true, throttled to 30 FPS
   useEffect(() => {
-    const dataArray = new Uint8Array(128);
-    let phase = 0;
+    if (!isPlaying) {
+      setAudioMetrics({ bass: 0, mid: 0, treble: 0, overall: 0, rawFrequencyData: new Uint8Array(128) });
+      return;
+    }
 
-    const renderLoop = () => {
-      if (isPlaying) {
+    const dataArray = new Uint8Array(128);
+    let lastUpdate = 0;
+
+    const renderLoop = (time: number) => {
+      if (time - lastUpdate > 33) { // ~30 FPS
+        lastUpdate = time;
         if (analyserRef.current) {
           analyserRef.current.getByteFrequencyData(dataArray);
-
-          let bassSum = 0;
+          let bassSum = 0, midSum = 0, trebleSum = 0;
           for (let i = 0; i < 15; i++) bassSum += dataArray[i];
-          let midSum = 0;
           for (let i = 16; i < 50; i++) midSum += dataArray[i];
-          let trebleSum = 0;
           for (let i = 51; i < 120; i++) trebleSum += dataArray[i];
-
           const bassVal = Math.min(1, (bassSum / 15) / 255);
           const midVal = Math.min(1, (midSum / 34) / 255);
           const trebleVal = Math.min(1, (trebleSum / 69) / 255);
-          const overallVal = (bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2);
-
           setAudioMetrics({
             bass: bassVal,
             mid: midVal,
             treble: trebleVal,
-            overall: overallVal,
+            overall: bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2,
             rawFrequencyData: new Uint8Array(dataArray),
           });
-        } else {
-          phase += 0.05;
-          const bassVal = 0.5 + 0.4 * Math.sin(phase * 1.5);
-          const midVal = 0.4 + 0.3 * Math.cos(phase * 2.1);
-          const trebleVal = 0.3 + 0.3 * Math.sin(phase * 4.2);
-
-          setAudioMetrics({
-            bass: bassVal,
-            mid: midVal,
-            treble: trebleVal,
-            overall: (bassVal + midVal + trebleVal) / 3,
-            rawFrequencyData: dataArray,
-          });
         }
-
-        if (!currentTrack.audioUrl && activeSource !== 'spotify') {
-          setCurrentTime((prev) => {
-            if (prev >= duration) {
-              nextTrack();
-              return 0;
-            }
-            return prev + 0.1;
-          });
-        }
-      } else {
-        setAudioMetrics((prev) => ({
-          bass: prev.bass * 0.9,
-          mid: prev.mid * 0.9,
-          treble: prev.treble * 0.9,
-          overall: prev.overall * 0.9,
-          rawFrequencyData: new Uint8Array(128),
-        }));
       }
-
       animFrameRef.current = requestAnimationFrame(renderLoop);
     };
 
     animFrameRef.current = requestAnimationFrame(renderLoop);
-    return () => {
-      if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    };
-  }, [isPlaying, currentTrack, activeSource, duration]);
+    return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
+  }, [isPlaying]);
 
   const updateGenreAndTheme = (track: Track) => {
     const detectedMapping = GenreDetectionEngine.detectGenre(track);
@@ -391,7 +409,9 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const connectSpotify = async () => {
-    const token = await SpotifyApiService.loginWithPopup(settings.spotifyClientId);
+    const clientId = (settings.spotifyClientId || '').trim() || localStorage.getItem('spotify_client_id')?.trim() || '';
+    if (clientId) localStorage.setItem('spotify_client_id', clientId);
+    const token = await SpotifyApiService.loginWithPopup(clientId);
     if (token) {
       setIsSpotifyConnected(true);
       setActiveSource('spotify');
@@ -402,74 +422,82 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     SpotifyApiService.logout();
     setIsSpotifyConnected(false);
     setSpotifyUserDisplayName(undefined);
+    setAlbums([]);
+    setCurrentTrack(EMPTY_TRACK);
+    setIsPlaying(false);
     setActiveSource('galactic');
   };
 
   const playTrack = (track: Track) => {
     setCurrentTrack(track);
     setCurrentTime(0);
-    setDuration(track.duration || 180);
-    setIsPlaying(true);
-    ensureAudioContext();
+    setDuration(track.duration || 0);
     updateGenreAndTheme(track);
 
     if (track.source === 'spotify' && track.spotifyUri) {
-      SpotifyApiService.play(track.spotifyUri).catch(console.warn);
+      // Pause local HTML5 audio to prevent dual audio streams playing
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+      setIsPlaying(true);
       setActiveSource('spotify');
-    } else if (track.audioUrl && audioRef.current) {
-      stopSyntheticAudio();
-      audioRef.current.src = track.audioUrl;
-      audioRef.current.play().catch(console.warn);
+      SpotifyApiService.play(track.spotifyUri).catch(console.warn);
+    } else if ((track as any).audioUrl && audioRef.current) {
+      // Pause Spotify remote player to prevent dual audio streams playing
+      SpotifyApiService.pause().catch(() => {});
+      ensureAudioContext();
+      audioRef.current.src = (track as any).audioUrl;
+      audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
+      setActiveSource('local');
     } else {
-      if (audioRef.current) audioRef.current.pause();
-      startSyntheticAudio();
+      // Demo/galactic track — no real audio
+      SpotifyApiService.pause().catch(() => {});
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+      }
+      setIsPlaying(false);
+      setActiveSource('galactic');
     }
   };
 
   const togglePlayPause = () => {
-    ensureAudioContext();
-    if (isPlaying) {
-      setIsPlaying(false);
-      if (audioRef.current) audioRef.current.pause();
-      if (currentTrack.source === 'spotify') SpotifyApiService.pause().catch(console.warn);
-      stopSyntheticAudio();
-    } else {
-      setIsPlaying(true);
-      if (currentTrack.source === 'spotify') {
-        SpotifyApiService.play().catch(console.warn);
-      } else if (currentTrack.audioUrl && audioRef.current) {
-        audioRef.current.play().catch(console.warn);
+    if (activeSource === 'spotify') {
+      if (isPlaying) {
+        SpotifyApiService.pause().catch(console.warn);
+        setIsPlaying(false);
       } else {
-        startSyntheticAudio();
+        SpotifyApiService.play().catch(console.warn);
+        setIsPlaying(true);
+      }
+    } else if (activeSource === 'local' && audioRef.current) {
+      ensureAudioContext();
+      if (isPlaying) {
+        audioRef.current.pause();
+        setIsPlaying(false);
+      } else {
+        audioRef.current.play().then(() => setIsPlaying(true)).catch(console.warn);
       }
     }
   };
 
   const nextTrack = () => {
-    if (currentTrack.source === 'spotify') {
+    if (activeSource === 'spotify') {
       SpotifyApiService.next().catch(console.warn);
     } else if (queue.length > 0) {
       const next = queue[0];
       setQueue((prev) => prev.slice(1));
       playTrack(next);
-    } else if (isRepeat) {
-      playTrack(currentTrack);
-    } else {
-      const currentIndex = GALACTIC_TRACKS.findIndex((t) => t.id === currentTrack.id);
-      const nextIndex = (currentIndex + 1) % GALACTIC_TRACKS.length;
-      playTrack(GALACTIC_TRACKS[nextIndex]);
     }
   };
 
   const previousTrack = () => {
-    if (currentTrack.source === 'spotify') {
+    if (activeSource === 'spotify') {
       SpotifyApiService.previous().catch(console.warn);
-    } else if (currentTime > 3) {
-      seekTo(0);
-    } else {
-      const currentIndex = GALACTIC_TRACKS.findIndex((t) => t.id === currentTrack.id);
-      const prevIndex = (currentIndex - 1 + GALACTIC_TRACKS.length) % GALACTIC_TRACKS.length;
-      playTrack(GALACTIC_TRACKS[prevIndex]);
+    } else if (audioRef.current && currentTime > 3) {
+      audioRef.current.currentTime = 0;
+      setCurrentTime(0);
     }
   };
 

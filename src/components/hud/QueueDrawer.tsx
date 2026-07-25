@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAudioEngine } from '../../context/AudioEngineContext';
 import { useThemeSettings } from '../../context/ThemeSettingsContext';
-import { ListMusic, X, Play, Trash2, GripVertical, ChevronRight } from 'lucide-react';
+import { ListMusic, X, Play, Trash2, GripVertical } from 'lucide-react';
 
 export const QueueDrawer: React.FC = () => {
   const { queue, removeFromQueue, clearQueue, playTrack } = useAudioEngine();
@@ -13,7 +13,18 @@ export const QueueDrawer: React.FC = () => {
       {/* Floating Toggle Button on HUD right side */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="fixed top-1/2 right-2 -translate-y-1/2 p-2.5 rounded-l-2xl alien-glass border-l border-t border-b border-white/10 text-emerald-400 hover:text-white shadow-2xl transition-all duration-300 z-40 hover:scale-105"
+        onMouseEnter={() => {
+          if ((window as any).electronAPI?.setIgnoreMouseEvents) {
+            (window as any).electronAPI.setIgnoreMouseEvents(false);
+          }
+        }}
+        onMouseLeave={() => {
+          if (!isOpen && (window as any).electronAPI?.setIgnoreMouseEvents) {
+            (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
+          }
+        }}
+        className="fixed top-1/2 right-2 -translate-y-1/2 p-2.5 rounded-l-2xl alien-glass border-l border-t border-b border-white/10 hover:text-white shadow-2xl transition-all duration-300 z-40 hover:scale-105"
+        style={{ color: themeConfig.primary }}
         title="Toggle Upcoming Queue"
       >
         <ListMusic className="w-5 h-5 animate-pulse" />
@@ -21,9 +32,24 @@ export const QueueDrawer: React.FC = () => {
 
       {/* Slide-out Queue Right Panel */}
       {isOpen && (
-        <div className="fixed top-0 right-0 h-full w-80 alien-glass border-l border-white/10 p-4 shadow-2xl z-50 animate-in slide-in-from-right duration-300 flex flex-col">
+        <div
+          onMouseEnter={() => {
+            if ((window as any).electronAPI?.setIgnoreMouseEvents) {
+              (window as any).electronAPI.setIgnoreMouseEvents(false);
+            }
+          }}
+          onMouseLeave={() => {
+            if ((window as any).electronAPI?.setIgnoreMouseEvents) {
+              (window as any).electronAPI.setIgnoreMouseEvents(true, { forward: true });
+            }
+          }}
+          className="fixed top-0 right-0 h-full w-80 alien-glass border-l border-white/10 p-4 shadow-2xl z-50 animate-in slide-in-from-right duration-300 flex flex-col"
+        >
           {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-white/10 font-orbitron text-xs font-semibold text-emerald-400">
+          <div
+            className="flex items-center justify-between pb-3 border-b border-white/10 font-orbitron text-xs font-semibold"
+            style={{ color: themeConfig.primary }}
+          >
             <span className="flex items-center space-x-2">
               <ListMusic className="w-4 h-4" />
               <span>UPCOMING TRANSMISSIONS</span>
@@ -47,13 +73,13 @@ export const QueueDrawer: React.FC = () => {
               queue.map((track, idx) => (
                 <div
                   key={`${track.id}-${idx}`}
-                  className="flex items-center justify-between p-2 rounded-xl bg-black/40 border border-white/5 hover:border-emerald-500/30 transition-all font-rajdhani text-xs group"
+                  className="flex items-center justify-between p-2 rounded-xl bg-black/40 border border-white/5 hover:border-white/20 transition-all font-rajdhani text-xs group"
                 >
                   <div className="flex items-center space-x-2 truncate">
                     <GripVertical className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 cursor-grab" />
                     <img src={track.coverUrl} alt={track.title} className="w-8 h-8 rounded object-cover" />
                     <div className="truncate">
-                      <div className="font-semibold text-slate-200 group-hover:text-emerald-300 truncate">
+                      <div className="font-semibold text-slate-200 truncate">
                         {track.title}
                       </div>
                       <div className="text-[10px] text-slate-400 truncate">{track.artist}</div>
@@ -66,7 +92,8 @@ export const QueueDrawer: React.FC = () => {
                         playTrack(track);
                         removeFromQueue(idx);
                       }}
-                      className="p-1 rounded text-slate-400 hover:text-emerald-400"
+                      className="p-1 rounded text-slate-400 hover:text-white"
+                      style={{ color: undefined }}
                       title="Play Now"
                     >
                       <Play className="w-3.5 h-3.5 fill-current" />
@@ -100,3 +127,4 @@ export const QueueDrawer: React.FC = () => {
     </>
   );
 };
+

@@ -53,9 +53,13 @@ export const PlaybackControls: React.FC = () => {
           triggerRipple(e);
           toggleShuffle();
         }}
-        className={`relative p-2.5 rounded-full transition-all duration-200 hover:-translate-y-1 ${
-          isShuffle ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 shadow-alien-glow' : 'text-slate-400 hover:text-white'
-        }`}
+        className="relative p-2.5 rounded-full transition-all duration-200 hover:-translate-y-1 border"
+        style={{
+          borderColor: isShuffle ? `${themeConfig.primary}60` : 'transparent',
+          backgroundColor: isShuffle ? `${themeConfig.primary}20` : 'transparent',
+          color: isShuffle ? themeConfig.primary : '#94a3b8',
+          boxShadow: isShuffle ? `0 0 12px ${themeConfig.primary}50` : 'none',
+        }}
         title="Shuffle Tracks"
       >
         <Shuffle className="w-4 h-4" />
@@ -67,7 +71,7 @@ export const PlaybackControls: React.FC = () => {
           triggerRipple(e);
           previousTrack();
         }}
-        className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1 hover:shadow-cyan-glow"
+        className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1"
         title="Previous Track (Left Arrow)"
       >
         <SkipBack className="w-5 h-5 fill-current" />
@@ -102,7 +106,7 @@ export const PlaybackControls: React.FC = () => {
           triggerRipple(e);
           nextTrack();
         }}
-        className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1 hover:shadow-cyan-glow"
+        className="relative p-3 rounded-full text-slate-300 hover:text-white bg-slate-800/40 hover:bg-slate-700/50 border border-white/10 transition-all duration-200 hover:-translate-y-1"
         title="Next Track (Right Arrow)"
       >
         <SkipForward className="w-5 h-5 fill-current" />
@@ -114,9 +118,13 @@ export const PlaybackControls: React.FC = () => {
           triggerRipple(e);
           toggleRepeat();
         }}
-        className={`relative p-2.5 rounded-full transition-all duration-200 hover:-translate-y-1 ${
-          isRepeat ? 'text-emerald-400 bg-emerald-500/20 border border-emerald-500/40 shadow-alien-glow' : 'text-slate-400 hover:text-white'
-        }`}
+        className="relative p-2.5 rounded-full transition-all duration-200 hover:-translate-y-1 border"
+        style={{
+          borderColor: isRepeat ? `${themeConfig.primary}60` : 'transparent',
+          backgroundColor: isRepeat ? `${themeConfig.primary}20` : 'transparent',
+          color: isRepeat ? themeConfig.primary : '#94a3b8',
+          boxShadow: isRepeat ? `0 0 12px ${themeConfig.primary}50` : 'none',
+        }}
         title="Repeat Track"
       >
         <Repeat className="w-4 h-4" />
@@ -153,8 +161,8 @@ export const PlaybackControls: React.FC = () => {
               step="0.01"
               value={isMuted ? 0 : volume}
               onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="h-24 w-2 accent-emerald-400 cursor-pointer appearance-none bg-slate-800 rounded-lg"
-              style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
+              className="h-24 w-2 cursor-pointer appearance-none bg-slate-800 rounded-lg"
+              style={{ writingMode: 'vertical-lr', direction: 'rtl', accentColor: themeConfig.primary }}
             />
           </div>
         )}
@@ -164,15 +172,17 @@ export const PlaybackControls: React.FC = () => {
       {ripples.map((r) => (
         <span
           key={r.id}
-          className="absolute pointer-events-none rounded-full bg-emerald-400/40 animate-ping"
+          className="absolute pointer-events-none rounded-full animate-ping"
           style={{
             left: r.x - 10,
             top: r.y - 10,
             width: 20,
             height: 20,
+            backgroundColor: `${themeConfig.primary}60`,
           }}
         />
       ))}
     </div>
   );
 };
+

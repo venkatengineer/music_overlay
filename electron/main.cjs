@@ -1,13 +1,18 @@
-const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, screen, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 
-// Disable hardware acceleration to prevent Windows transparent window DWM GPU crashes (exit_code=-1073741819)
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('disable-gpu-compositing');
+// Enforce single instance lock so duplicate processes don't conflict on ports or shortcuts
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  console.log('[LOG] Another instance of Aetheris OS is already running. Exiting duplicate...');
+  app.quit();
+  process.exit(0);
+}
 
-// Set isolated user data directory to prevent Windows file sharing locks (Error code: 32)
-const sessionUserData = path.join(app.getPath('temp'), 'aetheris_hud_session_' + Date.now());
+// Enable GPU Hardware Acceleration for buttery-smooth 60-144 FPS rendering
+// Use persistent appData directory so Spotify tokens, settings, and login remain saved forever across restarts
+const sessionUserData = path.join(app.getPath('appData'), 'aetheris_alien_music_overlay_data');
 app.setPath('userData', sessionUserData);
 
 console.log('====================================================');
@@ -18,81 +23,110 @@ let mainWindow = null;
 let tray = null;
 let oauthServer = null;
 
-function startOAuthServer() {
-  if (oauthServer) return;
-  try {
-    oauthServer = http.createServer((req, res) => {
-      const reqUrl = new URL(req.url, 'http://127.0.0.1:3000');
-      const code = reqUrl.searchParams.get('code');
-
-      if (code && mainWindow) {
-        console.log('[SPOTIFY OAUTH SERVER] Received authorization code! Forwarding to renderer...');
-        mainWindow.webContents.send('spotify-auth-code', code);
-        res.writeHead(200, {
-          'Content-Type': 'text/html',
-          'Access-Control-Allow-Origin': '*',
-        });
-        res.end(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Aetheris OS - Spotify Connected</title>
-              <style>
-                body { background: #040d12; color: #00ffaa; font-family: monospace; text-align: center; padding-top: 40px; }
-                .card { border: 1.5px solid #00ffaa; border-radius: 16px; padding: 25px; display: inline-block; box-shadow: 0 0 25px #00ffaa; background: #061822; }
-                h2 { margin: 0; font-size: 24px; letter-spacing: 2px; }
-                p { color: #00e5ff; }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <h2>🛸 AETHERIS OS</h2>
-                <h4 style="color:#ffffff;">SPOTIFY AUTHORIZATION SUCCESSFUL!</h4>
-                <p>Syncing live music stream with HUD overlay...</p>
-              </div>
-              <script>
-                if (window.opener) {
-                  try { window.opener.postMessage({ type: 'SPOTIFY_AUTH_CODE', code: ${JSON.stringify(code)} }, '*'); } catch(e) {}
-                }
-                setTimeout(() => window.close(), 1000);
-              </script>
-            </body>
-          </html>
-        `);
-        return;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' });
-      res.end('Aetheris OS OAuth Receiver Active');
-    });
-
-    oauthServer.listen(3000, '127.0.0.1', () => {
-      console.log('[LOG] Spotify OAuth Loopback Receiver active at http://127.0.0.1:3000/');
-    });
-
-    oauthServer.on('error', (err) => {
-      console.warn('[WARN] OAuth server note:', err.message);
-    });
-  } catch (e) {
-    console.warn('[WARN] Could not start OAuth loopback server:', e);
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(true, 'screen-saver');
   }
+});
+
+function startOAuthServer(portsToTry = [3000, 3001, 3002, 3003]) {
+  if (oauthServer) return;
+
+  const tryPort = (portIndex) => {
+    if (portIndex >= portsToTry.length) {
+      console.warn('[WARN] OAuth server: all ports in use, loopback redirect unavailable.');
+      return;
+    }
+    const port = portsToTry[portIndex];
+
+    try {
+      oauthServer = http.createServer((req, res) => {
+        const reqUrl = new URL(req.url, `http://127.0.0.1:${port}`);
+        const code = reqUrl.searchParams.get('code');
+
+        if (code && mainWindow) {
+          console.log('[SPOTIFY OAUTH SERVER] Received authorization code! Forwarding to renderer...');
+          mainWindow.webContents.send('spotify-auth-code', code);
+          res.writeHead(200, {
+            'Content-Type': 'text/html',
+            'Access-Control-Allow-Origin': '*',
+          });
+          res.end(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Aetheris OS - Spotify Connected</title>
+                <style>
+                  body { background: #040d12; color: #00ffaa; font-family: monospace; text-align: center; padding-top: 40px; }
+                  .card { border: 1.5px solid #00ffaa; border-radius: 16px; padding: 25px; display: inline-block; box-shadow: 0 0 25px #00ffaa; background: #061822; }
+                  h2 { margin: 0; font-size: 24px; letter-spacing: 2px; }
+                  p { color: #00e5ff; }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <h2>🛸 AETHERIS OS</h2>
+                  <h4 style="color:#ffffff;">SPOTIFY AUTHORIZATION SUCCESSFUL!</h4>
+                  <p>Syncing live music stream with HUD overlay...</p>
+                </div>
+                <script>
+                  if (window.opener) {
+                    try { window.opener.postMessage({ type: 'SPOTIFY_AUTH_CODE', code: ${JSON.stringify(code)} }, '*'); } catch(e) {}
+                  }
+                  setTimeout(() => window.close(), 1000);
+                </script>
+              </body>
+            </html>
+          `);
+          return;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': '*' });
+        res.end('Aetheris OS OAuth Receiver Active');
+      });
+
+      oauthServer.listen(port, '127.0.0.1', () => {
+        console.log(`[LOG] Spotify OAuth Loopback Receiver active at http://127.0.0.1:${port}/`);
+      });
+
+      oauthServer.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          console.warn(`[WARN] Port ${port} is in use, trying next port...`);
+          oauthServer = null;
+          tryPort(portIndex + 1);
+        } else {
+          console.warn('[WARN] OAuth server note:', err.message);
+        }
+      });
+    } catch (e) {
+      console.warn('[WARN] Could not start OAuth loopback server:', e);
+    }
+  };
+
+  tryPort(0);
 }
 
+
 async function createWindow() {
-  console.log('[LOG] Creating BrowserWindow with Rock-Solid Windows DWM Compositing...');
-  
+  console.log('[LOG] Creating Full Desktop Screen BrowserWindow with Transparency...');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
+
   mainWindow = new BrowserWindow({
-    width: 540,
-    height: 780,
-    x: 120,
-    y: 100,
+    width: screenWidth,
+    height: screenHeight,
+    x: 0,
+    y: 0,
     frame: false,
-    transparent: false, // Prevents GPU compositing crash on Windows
+    transparent: true,
     alwaysOnTop: true,
     resizable: true,
-    hasShadow: true,
+    hasShadow: false,
     show: true,
-    backgroundColor: '#040d12',
+    backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       nodeIntegration: false,
@@ -103,12 +137,43 @@ async function createWindow() {
 
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
 
-  const devUrl = 'http://localhost:3000';
-  const isDevLive = false; // Force loading built dist files for full desktop consistency
+  // Configure popup handler so Spotify Auth popup floats ON TOP of screen-saver overlay
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.log('[LOG] Intercepted window.open request for URL:', url);
+    return {
+      action: 'allow',
+      overrideBrowserWindowOptions: {
+        alwaysOnTop: true,
+        autoHideMenuBar: true,
+        center: true,
+        width: 550,
+        height: 750,
+        resizable: true,
+        frame: true,
+        title: 'Spotify Authorization',
+      },
+    };
+  });
+
+  mainWindow.webContents.on('did-create-window', (childWindow) => {
+    console.log('[LOG] Child popup window created! Forcing to front above overlay...');
+    childWindow.setAlwaysOnTop(true, 'screen-saver', 1);
+    childWindow.show();
+    childWindow.focus();
+
+    if (mainWindow) {
+      mainWindow.setIgnoreMouseEvents(false);
+    }
+  });
+
+  // Clear Chromium disk cache so local dist bundle updates always load fresh code!
+  try {
+    mainWindow.webContents.session.clearCache();
+  } catch (e) {}
 
   const indexPath = path.join(__dirname, '../dist/index.html');
-  console.log('[LOG] Loading local production build at:', indexPath);
-  mainWindow.loadFile(indexPath);
+  console.log('[LOG] Loading fresh production build at:', indexPath);
+  mainWindow.loadFile(indexPath, { search: `v=${Date.now()}` });
 
   mainWindow.show();
   mainWindow.focus();
@@ -126,36 +191,49 @@ async function createWindow() {
     if (!mainWindow) return;
 
     if (mainWindow.isVisible()) {
-      console.log('[LOG] Hiding overlay window...');
+      console.log('[LOG] Hiding overlay window & notifying renderer...');
       mainWindow.hide();
+      try { mainWindow.webContents.send('window-visibility-changed', false); } catch(e) {}
     } else {
-      console.log('[LOG] Showing & focusing overlay window...');
+      console.log('[LOG] Showing & focusing overlay window & notifying renderer...');
       mainWindow.show();
       mainWindow.focus();
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
+      try { mainWindow.webContents.send('window-visibility-changed', true); } catch(e) {}
     }
   };
 
   globalShortcut.unregisterAll();
 
-  const keysToRegister = [
-    { key: 'Alt+M', name: 'Alt+M' },
-    { key: 'Alt+Space', name: 'Alt+Space' },
-    { key: 'CommandOrControl+Space', name: 'Ctrl+Space' },
-    { key: 'F9', name: 'F9 Key' },
-    { key: 'F8', name: 'F8 Key' },
-    { key: 'F11', name: 'F11 Fullscreen' },
+  // Try shortcuts from most unique to most common — stop at first success
+  const keysToTry = [
+    { key: 'CommandOrControl+Alt+M', name: 'Ctrl+Alt+M' },
     { key: 'CommandOrControl+Shift+M', name: 'Ctrl+Shift+M' },
+    { key: 'Alt+M', name: 'Alt+M' },
+    { key: 'F9', name: 'F9' },
+    { key: 'F8', name: 'F8' },
+    { key: 'CommandOrControl+Alt+Space', name: 'Ctrl+Alt+Space' },
+    { key: 'Alt+Shift+M', name: 'Alt+Shift+M' },
   ];
 
-  keysToRegister.forEach(({ key, name }) => {
-    const success = globalShortcut.register(key, () => toggleVisibility(name));
-    if (success) {
-      console.log(`[LOG] Registered global shortcut: ${name} (${key}) - SUCCESS`);
-    } else {
-      console.warn(`[WARN] Failed to register global shortcut: ${name} (${key}) - MIGHT BE IN USE BY ANOTHER APP`);
+  let registeredCount = 0;
+  keysToTry.forEach(({ key, name }) => {
+    try {
+      const ok = globalShortcut.register(key, () => toggleVisibility(name));
+      if (ok) {
+        console.log(`[LOG] Registered global shortcut: ${name} (${key}) ✓`);
+        registeredCount++;
+      } else {
+        console.warn(`[WARN] Could not register shortcut: ${name} - likely in use by another process`);
+      }
+    } catch (e) {
+      console.warn(`[WARN] Error registering ${name}:`, e.message);
     }
   });
+
+  if (registeredCount === 0) {
+    console.warn('[WARN] No global shortcuts registered! Use the System Tray to show/hide the overlay.');
+  }
 
   try {
     const icon = nativeImage.createFromNamedImage('NSActionTemplate');
@@ -219,4 +297,11 @@ ipcMain.on('toggle-fullscreen', () => {
 
 ipcMain.on('close-window', () => {
   if (mainWindow) mainWindow.close();
+});
+
+ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) {
+    win.setIgnoreMouseEvents(ignore, options || { forward: true });
+  }
 });

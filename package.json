@@ -9,8 +9,8 @@
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
-    "electron": "npx electron .",
-    "electron:dev": "npx electron ."
+    "electron": "npm run build && npx electron .",
+    "electron:dev": "npm run build && npx electron ."
   },
   "dependencies": {
     "clsx": "^2.1.0",

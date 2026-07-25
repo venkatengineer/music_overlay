@@ -260,6 +260,54 @@ export class SpotifyApiService {
     return token;
   }
 
+  public static async refreshAccessToken(): Promise<string | null> {
+    const refreshToken = localStorage.getItem('spotify_refresh_token');
+    const rawId = localStorage.getItem('spotify_client_id') || DEFAULT_CLIENT_ID || '';
+    const clientId = rawId.trim().replace(/^["']|["']$/g, '');
+
+    if (!refreshToken || !clientId) return null;
+
+    const body = new URLSearchParams({
+      client_id: clientId,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+    });
+
+    try {
+      console.log('[SPOTIFY AUTH] Refreshing expired access token...');
+      const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body,
+      });
+
+      if (!response.ok) return null;
+      const data = await response.json();
+      const expiresAt = Date.now() + data.expires_in * 1000;
+
+      localStorage.setItem('spotify_access_token', data.access_token);
+      if (data.refresh_token) localStorage.setItem('spotify_refresh_token', data.refresh_token);
+      localStorage.setItem('spotify_token_expires_at', expiresAt.toString());
+
+      console.log('[SPOTIFY AUTH] Access token refreshed successfully!');
+      return data.access_token;
+    } catch (e) {
+      console.warn('[SPOTIFY AUTH] Failed to refresh token:', e);
+      return null;
+    }
+  }
+
+  public static async getValidAccessToken(): Promise<string | null> {
+    const token = localStorage.getItem('spotify_access_token');
+    const expiresAt = Number(localStorage.getItem('spotify_token_expires_at') || 0);
+
+    if (token && Date.now() < expiresAt - 30000) {
+      return token;
+    }
+
+    return await this.refreshAccessToken();
+  }
+
   public static logout() {
     localStorage.removeItem('spotify_access_token');
     localStorage.removeItem('spotify_refresh_token');
@@ -272,7 +320,7 @@ export class SpotifyApiService {
   }
 
   private static async fetchApi(endpoint: string, options: RequestInit = {}) {
-    const token = this.getStoredAccessToken();
+    const token = await this.getValidAccessToken();
     if (!token) throw new Error('Not authenticated with Spotify');
 
     const res = await fetch(`https://api.spotify.com/v1${endpoint}`, {
@@ -345,10 +393,20 @@ export class SpotifyApiService {
         body.context_uri = spotifyUri;
       }
     }
-    return this.fetchApi('/me/player/play', {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    });
+    try {
+      return await this.fetchApi('/me/player/play', {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+    } catch (err: any) {
+      console.warn('Spotify play request notice:', err);
+      if (err.message?.includes('404')) {
+        alert('Spotify Remote Notice:\nNo active Spotify device detected. Please open the Spotify App on your computer or phone and start playing a track to connect playback.');
+      } else if (err.message?.includes('403')) {
+        alert('Spotify Remote Notice:\nRemote playback control requires an active Spotify player or Spotify Premium account.');
+      }
+      throw err;
+    }
   }
 
   public static async pause() {
@@ -382,7 +440,7 @@ export class SpotifyApiService {
         title: item.name,
         artist: item.artists.map((a: any) => a.name).join(', '),
         album: item.album.name,
-        coverUrl: item.album.images[0]?.url || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500',
+        coverUrl: item.album.images[0]?.url || '/cover1.png',
         duration: Math.round(item.duration_ms / 1000),
         source: 'spotify' as const,
         spotifyUri: item.uri,
@@ -393,20 +451,82 @@ export class SpotifyApiService {
     }
   }
 
-  public static async getUserPlaylists(): Promise<Album[]> {
+  public static async getUserSavedTracks(limit = 25): Promise<Track[]> {
     try {
-      const data = await this.fetchApi('/me/playlists?limit=10');
+      const data = await this.fetchApi(`/me/tracks?limit=${limit}`);
       if (!data?.items) return [];
 
-      return data.items.map((item: any) => ({
-        id: item.id,
-        title: item.name,
-        artist: item.owner?.display_name || 'Spotify Playlist',
-        coverUrl: item.images[0]?.url || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=500',
-        tracks: [],
-      }));
+      return data.items
+        .filter((item: any) => item.track)
+        .map((item: any) => ({
+          id: `spotify:${item.track.id}`,
+          title: item.track.name,
+          artist: item.track.artists.map((a: any) => a.name).join(', '),
+          album: item.track.album?.name || 'Spotify Liked Songs',
+          coverUrl: item.track.album?.images[0]?.url || '/cover1.png',
+          duration: Math.round(item.track.duration_ms / 1000),
+          source: 'spotify' as const,
+          spotifyUri: item.track.uri,
+        }));
     } catch (err) {
-      console.warn('Failed to load user playlists from Spotify:', err);
+      console.warn('Failed to load user saved tracks from Spotify:', err);
+      return [];
+    }
+  }
+
+  public static async getPlaylistTracks(playlistId: string, limit = 25): Promise<Track[]> {
+    try {
+      const data = await this.fetchApi(`/playlists/${playlistId}/tracks?limit=${limit}`);
+      if (!data?.items) return [];
+
+      return data.items
+        .filter((item: any) => item.track)
+        .map((item: any) => ({
+          id: `spotify:${item.track.id}`,
+          title: item.track.name,
+          artist: item.track.artists.map((a: any) => a.name).join(', '),
+          album: item.track.album?.name || 'Spotify Album',
+          coverUrl: item.track.album?.images[0]?.url || '/cover1.png',
+          duration: Math.round(item.track.duration_ms / 1000),
+          source: 'spotify' as const,
+          spotifyUri: item.track.uri,
+        }));
+    } catch (err) {
+      console.warn(`Failed to load tracks for playlist ${playlistId}:`, err);
+      return [];
+    }
+  }
+
+  public static async getUserPlaylistsWithTracks(): Promise<Album[]> {
+    try {
+      const playlistsData = await this.fetchApi('/me/playlists?limit=8');
+      if (!playlistsData?.items) return [];
+
+      const albumsWithTracks: Album[] = [];
+      for (const pl of playlistsData.items) {
+        const tracks = await this.getPlaylistTracks(pl.id, 20);
+        if (tracks.length > 0) {
+          albumsWithTracks.push({
+            id: `spotify-pl-${pl.id}`,
+            title: pl.name,
+            artist: pl.owner?.display_name || 'Spotify Playlist',
+            coverUrl: pl.images[0]?.url || '/cover1.png',
+            tracks,
+          });
+        }
+      }
+      return albumsWithTracks;
+    } catch (err) {
+      console.warn('Failed to load user playlists with tracks from Spotify:', err);
+      return [];
+    }
+  }
+
+  public static async getAvailableDevices(): Promise<any[]> {
+    try {
+      const data = await this.fetchApi('/me/player/devices');
+      return data?.devices || [];
+    } catch (e) {
       return [];
     }
   }

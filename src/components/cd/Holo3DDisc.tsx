@@ -7,7 +7,14 @@ export const Holo3DDisc: React.FC = () => {
   const { themeConfig, settings } = useThemeSettings();
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const discRef = useRef<HTMLDivElement | null>(null);
   const plasmaCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Store volatile data in refs so the canvas RAF loop reads them without triggering re-mount
+  const metricsRef = useRef(audioMetrics);
+  const playingRef = useRef(isPlaying);
+  metricsRef.current = audioMetrics;
+  playingRef.current = isPlaying;
 
   // 3D Tilt State
   const [tilt, setTilt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -18,6 +25,22 @@ export const Holo3DDisc: React.FC = () => {
   const rotationRef = useRef<number>(0);
   const speedRef = useRef<number>(0);
   const animFrameRef = useRef<number | null>(null);
+  const [isFlipping, setIsFlipping] = useState<boolean>(false);
+  const prevTrackIdRef = useRef<string>(currentTrack.id);
+
+  // Trigger smooth 3D Holographic Flip & Speed Surge on Track Change
+  useEffect(() => {
+    if (prevTrackIdRef.current !== currentTrack.id) {
+      prevTrackIdRef.current = currentTrack.id;
+      setIsFlipping(true);
+      speedRef.current += 150; // Sci-fi disc spin surge on track change!
+
+      const timer = setTimeout(() => {
+        setIsFlipping(false);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [currentTrack.id]);
 
   // Disc Spin Loop with Genre Particle Speed Boost
   useEffect(() => {
@@ -33,11 +56,8 @@ export const Holo3DDisc: React.FC = () => {
       speedRef.current += (targetSpeed - speedRef.current) * 0.05;
       rotationRef.current = (rotationRef.current + speedRef.current * delta) % 360;
 
-      if (containerRef.current) {
-        const discElement = containerRef.current.querySelector('.holo-disc-surface') as HTMLElement;
-        if (discElement) {
-          discElement.style.transform = `rotate(${rotationRef.current}deg)`;
-        }
+      if (discRef.current) {
+        discRef.current.style.transform = `rotate(${rotationRef.current}deg) ${isFlipping ? 'scale(0.9) rotateY(180deg)' : 'scale(1) rotateY(0deg)'}`;
       }
 
       animFrameRef.current = requestAnimationFrame(spinLoop);
@@ -47,7 +67,7 @@ export const Holo3DDisc: React.FC = () => {
     return () => {
       if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
     };
-  }, [isPlaying, genreMapping]);
+  }, [isPlaying, genreMapping, isFlipping]);
 
   // Handle Mouse 3D Tilt Physics
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -91,9 +111,9 @@ export const Holo3DDisc: React.FC = () => {
       ctx.clearRect(0, 0, size, size);
       plasmaAngle += 0.02 * (genreMapping?.particleSpeedMultiplier || 1.0);
 
-      const bass = audioMetrics.bass * (isPlaying ? 1 : 0.15);
-      const treble = audioMetrics.treble * (isPlaying ? 1 : 0.15);
-      const rawData = audioMetrics.rawFrequencyData;
+      const bass = metricsRef.current.bass * (playingRef.current ? 1 : 0.15);
+      const treble = metricsRef.current.treble * (playingRef.current ? 1 : 0.15);
+      const rawData = metricsRef.current.rawFrequencyData;
       const waveType = genreMapping?.visualizerWaveType || 'smooth';
 
       const numPoints = 120;
@@ -110,23 +130,18 @@ export const Holo3DDisc: React.FC = () => {
 
         // Waveform shape depending on genre!
         if (waveType === 'jagged') {
-          // Sharp Heavy Metal Spikes
           wave = (Math.random() - 0.5) * (15 + bass * 25);
           spike = val * 35;
         } else if (waveType === 'neon') {
-          // Multi-harmonic Synthwave Cyber Waves
           wave = Math.sin(angle * 12 + plasmaAngle * 4) * (8 + bass * 18);
           spike = val * 20 + treble * 15;
         } else if (waveType === 'breathing') {
-          // Solar Acoustic Breathing Pulse
           wave = Math.sin(plasmaAngle * 2) * (10 + bass * 12);
           spike = val * 12;
         } else if (waveType === 'pulses') {
-          // EDM / Pop Multi-Ring Pulse
           wave = Math.cos(angle * 8 + plasmaAngle * 3) * (10 + treble * 22);
           spike = val * 30;
         } else {
-          // Ambient Smooth Waves
           wave = Math.sin(angle * 6 + plasmaAngle * 3) * (6 + bass * 15);
           spike = (val * 25) + (treble * 12);
         }
@@ -142,8 +157,6 @@ export const Holo3DDisc: React.FC = () => {
       ctx.closePath();
       ctx.strokeStyle = themeConfig.primary;
       ctx.lineWidth = 3 + bass * 4;
-      ctx.shadowColor = themeConfig.primary;
-      ctx.shadowBlur = 18 * settings.glowIntensity * (genreMapping?.glowMultiplier || 1.0);
       ctx.stroke();
 
       // Secondary Plasma Arc Layer
@@ -161,8 +174,6 @@ export const Holo3DDisc: React.FC = () => {
       ctx.closePath();
       ctx.strokeStyle = themeConfig.secondary;
       ctx.lineWidth = 1.5;
-      ctx.shadowColor = themeConfig.secondary;
-      ctx.shadowBlur = 10 * settings.glowIntensity;
       ctx.stroke();
       ctx.restore();
 
@@ -171,7 +182,7 @@ export const Holo3DDisc: React.FC = () => {
 
     renderPlasma();
     return () => cancelAnimationFrame(animId);
-  }, [audioMetrics, isPlaying, themeConfig, settings, genreMapping]);
+  }, [themeConfig, settings, genreMapping]);
 
   // Wrapped Progress Calculation
   const progressPercent = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
@@ -263,11 +274,13 @@ export const Holo3DDisc: React.FC = () => {
           />
 
           <div
+            ref={discRef}
             className="holo-disc-surface relative w-full h-full rounded-full overflow-hidden border border-white/20 shadow-inner"
             style={{
               backgroundImage: `url(${currentTrack.coverUrl})`,
               backgroundSize: 'cover',
               backgroundPosition: 'center',
+              transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease-in-out',
             }}
           >
             <div className="absolute inset-0 rounded-full disc-iridescence mix-blend-color-dodge opacity-60 pointer-events-none" />
@@ -275,7 +288,7 @@ export const Holo3DDisc: React.FC = () => {
             <div
               className="absolute inset-0 rounded-full pointer-events-none opacity-20"
               style={{
-                backgroundImage: 'radial-gradient(circle, transparent 30%, rgba(0,255,170,0.4) 31%, transparent 32%), repeating-conic-gradient(from 0deg, transparent 0deg 10deg, rgba(255,255,255,0.1) 10deg 20deg)',
+                backgroundImage: `radial-gradient(circle, transparent 30%, ${themeConfig.primary}66 31%, transparent 32%), repeating-conic-gradient(from 0deg, transparent 0deg 10deg, rgba(255,255,255,0.1) 10deg 20deg)`,
               }}
             />
 
@@ -283,7 +296,10 @@ export const Holo3DDisc: React.FC = () => {
 
             <div className="absolute inset-0 m-auto w-16 h-16 rounded-full bg-black/90 border-4 border-slate-700/80 shadow-2xl flex items-center justify-center">
               <div className="w-6 h-6 rounded-full bg-black border border-white/40 shadow-inner flex items-center justify-center">
-                <div className="w-2 h-2 rounded-full bg-emerald-400 opacity-80" />
+                <div
+                  className="w-2 h-2 rounded-full opacity-80"
+                  style={{ backgroundColor: themeConfig.primary, boxShadow: `0 0 6px ${themeConfig.primary}` }}
+                />
               </div>
             </div>
           </div>
