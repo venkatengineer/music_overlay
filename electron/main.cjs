@@ -2,6 +2,9 @@ const { app, BrowserWindow, globalShortcut, ipcMain, Tray, Menu, nativeImage, sc
 const path = require('path');
 const http = require('http');
 
+// Detect if launched automatically at Windows login via --startup flag
+const isStartup = process.argv.includes('--startup');
+
 // Enforce single instance lock so duplicate processes don't conflict on ports or shortcuts
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
@@ -17,6 +20,7 @@ app.setPath('userData', sessionUserData);
 
 console.log('====================================================');
 console.log('   AETHERIS OS ELECTRON DESKTOP OVERLAY LAUNCHER    ');
+console.log(`   Startup mode: ${isStartup ? 'SILENT BACKGROUND (SLEEP)' : 'NORMAL SHOW'}`);
 console.log('====================================================');
 
 let mainWindow = null;
@@ -24,11 +28,13 @@ let tray = null;
 let oauthServer = null;
 
 app.on('second-instance', () => {
+  console.log('[LOG] Second instance launched manually -- waking and showing existing overlay!');
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
     mainWindow.focus();
     mainWindow.setAlwaysOnTop(true, 'screen-saver');
+    try { mainWindow.webContents.send('window-visibility-changed', true); } catch(e) {}
   }
 });
 
@@ -126,7 +132,7 @@ async function createWindow() {
     alwaysOnTop: true,
     resizable: true,
     hasShadow: false,
-    show: true,
+    show: !isStartup,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -137,6 +143,14 @@ async function createWindow() {
   });
 
   mainWindow.setAlwaysOnTop(true, 'screen-saver');
+
+  mainWindow.on('show', () => {
+    try { mainWindow.webContents.send('window-visibility-changed', true); } catch (e) {}
+  });
+
+  mainWindow.on('hide', () => {
+    try { mainWindow.webContents.send('window-visibility-changed', false); } catch (e) {}
+  });
 
   mainWindow.webContents.on('console-message', (_event, _level, message) => {
     if (message.includes('Third-party cookie') || message.includes('Electron Security Warning')) return;
@@ -181,11 +195,18 @@ async function createWindow() {
   console.log('[LOG] Loading fresh production build at:', indexPath);
   mainWindow.loadFile(indexPath, { search: `v=${Date.now()}` });
 
-  mainWindow.show();
-  mainWindow.focus();
+  if (!isStartup) {
+    mainWindow.show();
+    mainWindow.focus();
+  } else {
+    console.log('[LOG] Startup launch detected -- overlay initialized SILENTLY in background sleep mode.');
+  }
 
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[LOG] Window WebContents finished loading successfully!');
+    try {
+      mainWindow.webContents.send('window-visibility-changed', !isStartup && mainWindow.isVisible());
+    } catch (e) {}
   });
 
   mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
@@ -197,11 +218,11 @@ async function createWindow() {
     if (!mainWindow) return;
 
     if (mainWindow.isVisible()) {
-      console.log('[LOG] Hiding overlay window & notifying renderer...');
+      console.log('[LOG] Hiding overlay window (entering SLEEP MODE)...');
       mainWindow.hide();
       try { mainWindow.webContents.send('window-visibility-changed', false); } catch(e) {}
     } else {
-      console.log('[LOG] Showing & focusing overlay window & notifying renderer...');
+      console.log('[LOG] Showing & focusing overlay window (WAKE SEQUENCE)...');
       mainWindow.show();
       mainWindow.focus();
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
@@ -290,6 +311,41 @@ app.on('will-quit', () => {
   if (oauthServer) oauthServer.close();
 });
 
+ipcMain.handle('get-auto-start', () => {
+  try {
+    const settings = app.getLoginItemSettings({
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    return settings.openAtLogin;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('set-auto-start', (event, enable) => {
+  console.log(`[IPC] Configuring Windows Login Auto-Start: ${enable}`);
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(enable),
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    const settings = app.getLoginItemSettings({
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    return settings.openAtLogin;
+  } catch (e) {
+    console.warn('[WARN] Failed to configure login item settings:', e.message);
+    return false;
+  }
+});
+
+ipcMain.handle('get-initial-visibility', () => {
+  return mainWindow ? (!isStartup && mainWindow.isVisible()) : true;
+});
+
 ipcMain.on('toggle-always-on-top', (event, flag) => {
   if (mainWindow) mainWindow.setAlwaysOnTop(flag, 'screen-saver');
 });
@@ -302,7 +358,10 @@ ipcMain.on('toggle-fullscreen', () => {
 });
 
 ipcMain.on('close-window', () => {
-  if (mainWindow) mainWindow.close();
+  if (mainWindow) {
+    console.log('[LOG] Close/hide requested by renderer -- hiding overlay into SLEEP MODE...');
+    mainWindow.hide();
+  }
 });
 
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {

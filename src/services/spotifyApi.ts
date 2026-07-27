@@ -67,6 +67,8 @@ export interface SpotifyAlbumFull {
 
 export class SpotifyApiService {
   private static pollingTimer: number | null = null;
+  private static isPollingActive = false;
+  private static pollSequence = 0;
   private static searchCache = new Map<string, OfficialSpotifySearchResult>();
   private static albumCache = new Map<string, SpotifyAlbumFull>();
 
@@ -443,22 +445,33 @@ export class SpotifyApiService {
   }
 
   public static startPlayerPolling(callback: (state: SpotifyPlayerState | null) => void, intervalMs = 1500) {
-    if (this.pollingTimer) clearInterval(this.pollingTimer);
+    this.stopPlayerPolling();
+    this.isPollingActive = true;
 
     const poll = async () => {
+      if (!this.isPollingActive) return;
+      const currentSeq = ++this.pollSequence;
+
       if (this.getStoredAccessToken()) {
         const state = await this.getPlaybackState();
-        callback(state);
+        if (this.isPollingActive && currentSeq === this.pollSequence) {
+          callback(state);
+        }
+      }
+
+      if (this.isPollingActive) {
+        this.pollingTimer = window.setTimeout(poll, intervalMs);
       }
     };
 
     poll();
-    this.pollingTimer = window.setInterval(poll, intervalMs);
   }
 
   public static stopPlayerPolling() {
-    if (this.pollingTimer) {
-      clearInterval(this.pollingTimer);
+    this.isPollingActive = false;
+    this.pollSequence++;
+    if (this.pollingTimer !== null) {
+      window.clearTimeout(this.pollingTimer);
       this.pollingTimer = null;
     }
   }

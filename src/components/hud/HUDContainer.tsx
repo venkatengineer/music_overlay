@@ -4,7 +4,7 @@ import { useThemeSettings } from '../../context/ThemeSettingsContext';
 import { Holo3DDisc } from '../cd/Holo3DDisc';
 import { TrackInfoDisplay } from './TrackInfoDisplay';
 import { PlaybackControls } from './PlaybackControls';
-import { AlbumDrawer } from './AlbumDrawer';
+import { LyricsPanel } from './LyricsPanel';
 import { GalacticSearch } from './GalacticSearch';
 import { CurrentAlbumPanel } from './CurrentAlbumPanel';
 import { QueueDrawer } from './QueueDrawer';
@@ -208,29 +208,81 @@ export const HUDContainer: React.FC = () => {
           <SettingsModal />
 
           <button
-            onClick={() => setIsVisible(false)}
+            onClick={() => {
+              if ((window as any).electronAPI?.closeWindow) {
+                (window as any).electronAPI.closeWindow();
+              } else {
+                setIsVisible(false);
+              }
+            }}
             className="p-1.5 rounded-full text-slate-400 hover:text-yellow-400 transition-colors"
-            title="Minimize Overlay (Alt+M / ESC)"
+            title="Minimize Overlay to Sleep Mode (Alt+M / ESC)"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
 
           <button
-            onClick={() => setIsVisible(false)}
+            onClick={() => {
+              if ((window as any).electronAPI?.closeWindow) {
+                (window as any).electronAPI.closeWindow();
+              } else {
+                setIsVisible(false);
+              }
+            }}
             className="p-1.5 rounded-full text-slate-400 hover:text-red-400 transition-colors"
-            title="Close Overlay"
+            title="Hide Overlay to Sleep Mode"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Main Content Layout depending on View Mode */}
-      {viewMode === 'desktop' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start my-auto py-3">
+      {/* Main Content Layout: First Run Onboarding vs Desktop/Compact Command Deck */}
+      {!isSpotifyConnected ? (
+        <div className="flex flex-col items-center justify-center text-center p-8 my-auto py-12 space-y-6 animate-in fade-in zoom-in-95">
+          <div
+            className="p-5 rounded-full border shadow-2xl animate-pulse"
+            style={{
+              borderColor: themeConfig.primary,
+              backgroundColor: `${themeConfig.primary}15`,
+              boxShadow: `0 0 30px ${themeConfig.primary}40`,
+            }}
+          >
+            <Cpu className="w-14 h-14 animate-spin" style={{ color: themeConfig.primary }} />
+          </div>
+
+          <div className="space-y-2 max-w-md">
+            <h2
+              className="font-orbitron text-2xl font-extrabold tracking-widest uppercase"
+              style={{ color: themeConfig.primary, textShadow: `0 0 16px ${themeConfig.primary}aa` }}
+            >
+              AETHERIS OS
+            </h2>
+            <p className="font-orbitron text-xs font-bold tracking-wider text-cyan-400 uppercase">
+              CONNECT YOUR MUSIC
+            </p>
+            <p className="font-rajdhani text-sm text-slate-300 font-semibold leading-relaxed">
+              Synchronize your live Spotify stream with extraterrestrial 3D disc physics, reactive plasma visualizers, and genre auto-morphing.
+            </p>
+          </div>
+
+          <button
+            onClick={connectSpotify}
+            className="px-8 py-3.5 rounded-full font-orbitron text-xs font-extrabold tracking-widest text-black uppercase transition-all duration-300 hover:scale-105 shadow-2xl flex items-center space-x-3 cursor-pointer"
+            style={{
+              background: `linear-gradient(135deg, ${themeConfig.primary}, ${themeConfig.secondary})`,
+              boxShadow: `0 0 25px ${themeConfig.primary}`,
+            }}
+          >
+            <LogIn className="w-4 h-4" />
+            <span>CONNECT SPOTIFY</span>
+          </button>
+        </div>
+      ) : viewMode === 'desktop' ? (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch my-auto py-3">
           {/* Left Column: Visualizer, Song Info & Playback Controls */}
           <div
-            className="lg:col-span-5 flex flex-col items-center justify-center p-5 rounded-3xl bg-black/40 border space-y-4"
+            className="lg:col-span-5 flex flex-col items-center justify-center p-6 rounded-3xl bg-black/40 border shadow-2xl h-full space-y-6"
             style={{ borderColor: `${themeConfig.primary}30` }}
           >
             <Holo3DDisc />
@@ -238,22 +290,22 @@ export const HUDContainer: React.FC = () => {
             <PlaybackControls />
           </div>
 
-          {/* Right Column: Search, Current Album Panel, Albums/Playlists Archive, Queue */}
-          <div className="lg:col-span-7 flex flex-col space-y-4 p-5 rounded-3xl bg-black/40 border border-white/10">
+          {/* Right Column: Search, Current Album Panel, Live Synchronized Lyrics, Queue */}
+          <div className="lg:col-span-7 flex flex-col space-y-4 p-5 rounded-3xl bg-black/40 border border-white/10 shadow-2xl h-full">
             <GalacticSearch />
             <CurrentAlbumPanel />
-            <AlbumDrawer />
+            <LyricsPanel />
             <QueueDrawer />
           </div>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3 p-2">
           <Holo3DDisc />
           <TrackInfoDisplay />
           <PlaybackControls />
           <GalacticSearch />
           <CurrentAlbumPanel />
-          <AlbumDrawer />
+          <LyricsPanel />
           <QueueDrawer />
         </div>
       )}

@@ -4,7 +4,7 @@ import { useThemeSettings } from '../../context/ThemeSettingsContext';
 import { Activity, Music, Sparkles } from 'lucide-react';
 
 export const TrackInfoDisplay: React.FC = () => {
-  const { currentTrack, currentTime, duration, activeSource, audioMetrics, genreMapping } = useAudioEngine();
+  const { currentTrack, currentTime, duration, activeSource, audioMetrics, genreMapping, isOverlayVisible } = useAudioEngine();
   const { themeConfig } = useThemeSettings();
 
   // Animated Alien Glyph Text Scramble Effect (Original Initial Commit Implementation)
@@ -12,6 +12,11 @@ export const TrackInfoDisplay: React.FC = () => {
   const [displayArtist, setDisplayArtist] = useState<string>(currentTrack.artist);
 
   useEffect(() => {
+    if (!isOverlayVisible) {
+      setDisplayTitle(currentTrack.title);
+      return;
+    }
+
     const glyphs = '☤☥☧☨☩☫☬☭☯☽☾✙✚✛✜✢✣✤✥✦✧★☆✯▲▼◀▶◆◇';
     let iteration = 0;
     const targetTitle = currentTrack.title || '';
@@ -37,9 +42,14 @@ export const TrackInfoDisplay: React.FC = () => {
     }, 35);
 
     return () => clearInterval(interval);
-  }, [currentTrack.id, currentTrack.title]);
+  }, [currentTrack.id, currentTrack.title, isOverlayVisible]);
 
   useEffect(() => {
+    if (!isOverlayVisible) {
+      setDisplayArtist(currentTrack.artist);
+      return;
+    }
+
     const glyphs = '☤☥☧☨☩☫☬☭☯☽☾✙✚✛✜✢✣✤✥✦✧★☆✯▲▼◀▶◆◇';
     let iteration = 0;
     const targetArtist = currentTrack.artist || '';
@@ -65,7 +75,7 @@ export const TrackInfoDisplay: React.FC = () => {
     }, 35);
 
     return () => clearInterval(interval);
-  }, [currentTrack.id, currentTrack.artist]);
+  }, [currentTrack.id, currentTrack.artist, isOverlayVisible]);
 
   const formatTime = (secs: number) => {
     if (isNaN(secs)) return '00:00';
@@ -75,7 +85,7 @@ export const TrackInfoDisplay: React.FC = () => {
   };
 
   return (
-    <div className="flex flex-col items-center justify-center text-center py-2 px-4 select-none w-full max-w-[360px] overflow-hidden">
+    <div className="flex flex-col items-center justify-center text-center py-2 px-4 select-none w-full max-w-[440px] overflow-hidden">
       {/* Sci-Fi Diagnostic Badge */}
       <div className="flex items-center justify-center space-x-2 text-[10px] tracking-widest font-mono mb-1 text-slate-400 uppercase w-full">
         <span className="flex items-center space-x-1 px-2 py-0.5 rounded-full border border-white/10 bg-black/40 flex-shrink-0">
@@ -102,6 +112,7 @@ export const TrackInfoDisplay: React.FC = () => {
           style={{
             color: themeConfig.primary,
             textShadow: `0 0 14px ${themeConfig.primary}bb`,
+            fontFamily: "'Orbitron', 'Noto Sans Tamil', 'Mukta', system-ui, sans-serif",
           }}
           title={currentTrack.title}
         >
@@ -111,11 +122,15 @@ export const TrackInfoDisplay: React.FC = () => {
 
       {/* Artist & Album */}
       <div className="flex items-center justify-center space-x-2 font-rajdhani text-sm font-semibold text-slate-300 w-full overflow-hidden px-2">
-        <span className="truncate max-w-[150px]" title={currentTrack.artist}>
+        <span
+          className="truncate max-w-[170px]"
+          style={{ fontFamily: "'Rajdhani', 'Noto Sans Tamil', 'Mukta', system-ui, sans-serif" }}
+          title={currentTrack.artist}
+        >
           {displayArtist}
         </span>
         <span className="text-slate-600 flex-shrink-0">•</span>
-        <span className="text-slate-400 font-mono text-xs flex items-center gap-1 truncate max-w-[150px]" title={currentTrack.album}>
+        <span className="text-slate-400 font-mono text-xs flex items-center gap-1 truncate max-w-[170px]" title={currentTrack.album}>
           <Music className="w-3 h-3 flex-shrink-0 text-slate-500" />
           <span className="truncate">{currentTrack.album}</span>
         </span>

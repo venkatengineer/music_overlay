@@ -59,6 +59,60 @@
   --accent-glow: rgba(234, 179, 8, 0.35);
 }
 
+[data-theme="cyber-purple"] {
+  --primary-color: #a855f7;
+  --secondary-color: #8b5cf6;
+  --accent-color: #ec4899;
+  --primary-glow: rgba(168, 85, 247, 0.35);
+  --secondary-glow: rgba(139, 92, 246, 0.35);
+  --accent-glow: rgba(236, 72, 153, 0.35);
+}
+
+[data-theme="neon-pink"] {
+  --primary-color: #ec4899;
+  --secondary-color: #f43f5e;
+  --accent-color: #d946ef;
+  --primary-glow: rgba(236, 72, 153, 0.35);
+  --secondary-glow: rgba(244, 63, 94, 0.35);
+  --accent-glow: rgba(217, 70, 239, 0.35);
+}
+
+[data-theme="electric-cyan"] {
+  --primary-color: #06b6d4;
+  --secondary-color: #0ea5e9;
+  --accent-color: #10b981;
+  --primary-glow: rgba(6, 182, 212, 0.35);
+  --secondary-glow: rgba(14, 165, 233, 0.35);
+  --accent-glow: rgba(16, 185, 129, 0.35);
+}
+
+[data-theme="solar-gold"] {
+  --primary-color: #f59e0b;
+  --secondary-color: #ef4444;
+  --accent-color: #eab308;
+  --primary-glow: rgba(245, 158, 11, 0.35);
+  --secondary-glow: rgba(239, 68, 68, 0.35);
+  --accent-glow: rgba(234, 179, 8, 0.35);
+}
+
+[data-theme="emerald-abyss"] {
+  --primary-color: #10b981;
+  --secondary-color: #84cc16;
+  --accent-color: #06b6d4;
+  --primary-glow: rgba(16, 185, 129, 0.35);
+  --secondary-glow: rgba(132, 204, 22, 0.35);
+  --accent-glow: rgba(6, 182, 212, 0.35);
+}
+
+[data-theme="obsidian-dark"] {
+  --primary-color: #94a3b8;
+  --secondary-color: #64748b;
+  --accent-color: #cbd5e1;
+  --primary-glow: rgba(148, 163, 184, 0.35);
+  --secondary-glow: rgba(100, 116, 139, 0.35);
+  --accent-glow: rgba(203, 213, 225, 0.35);
+}
+
 /* Custom Scrollbar for alien HUD */
 ::-webkit-scrollbar {
   width: 5px;
@@ -141,4 +195,13 @@
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Low-Resource Sleep Mode - Freeze all CSS animations & transitions when overlay is hidden */
+body.sleeping-mode *,
+body.sleeping-mode *::before,
+body.sleeping-mode *::after {
+  animation-play-state: paused !important;
+  transition: none !important;
+}
+
 

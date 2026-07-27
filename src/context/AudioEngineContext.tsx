@@ -3,7 +3,7 @@ import { Track, Album, AudioMetrics } from '../types/music';
 import { SpotifyApiService, SpotifyPlayerState } from '../services/spotifyApi';
 import { GenreDetectionEngine, GenreThemeMapping, GENRE_MAPPINGS } from '../services/genreEngine';
 import { useThemeSettings } from './ThemeSettingsContext';
-import { extractThemeFromImage } from '../utils/colorExtractor';
+import { extractDynamicThemeFromImage, extractThemeFromImage } from '../utils/colorExtractor';
 
 // Empty track placeholder — shown when no Spotify track is loaded yet
 export const EMPTY_TRACK: Track = {
@@ -32,6 +32,8 @@ interface AudioEngineContextType {
   genreMapping: GenreThemeMapping;
   isSpotifyConnected: boolean;
   spotifyUserDisplayName?: string;
+  isOverlayVisible: boolean;
+  getPlaybackProgressMs: () => number;
   
   // Actions
   playTrack: (track: Track, contextUri?: string) => void;
@@ -58,6 +60,8 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const { settings, updateSettings } = useThemeSettings();
 
   const [currentTrack, setCurrentTrack] = useState<Track>(EMPTY_TRACK);
+  const currentTrackRef = useRef<Track>(currentTrack);
+  currentTrackRef.current = currentTrack;
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [duration, setDuration] = useState<number>(0);
@@ -72,6 +76,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [genreMapping, setGenreMapping] = useState<GenreThemeMapping>(GENRE_MAPPINGS.ambient);
   const [isSpotifyConnected, setIsSpotifyConnected] = useState<boolean>(!!SpotifyApiService.getStoredAccessToken());
   const [spotifyUserDisplayName, setSpotifyUserDisplayName] = useState<string | undefined>(undefined);
+  const [isOverlayVisible, setIsOverlayVisible] = useState<boolean>(true);
 
   // Real-time audio metrics for visualizer
   const [audioMetrics, setAudioMetrics] = useState<AudioMetrics>({
@@ -88,6 +93,7 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const synthOscRef = useRef<OscillatorNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const animFrameRef = useRef<number | null>(null);
+  const lastMetricsUpdateRef = useRef<number>(0);
 
   // Initialize Web Audio Engine
   useEffect(() => {
@@ -120,14 +126,86 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     SpotifyApiService.checkAndHandleCallback();
   }, []);
 
-  // Log visibility changes without stopping background music
+  // Window Visibility IPC Bridge Listener & Low-Resource Sleep / Wake Lifecycle Engine
   useEffect(() => {
+    if ((window as any).electronAPI?.getInitialVisibility) {
+      (window as any).electronAPI.getInitialVisibility().then((initVis: boolean) => {
+        console.log('[AUDIO ENGINE] Initial window visibility status:', initVis);
+        setIsOverlayVisible(initVis);
+        if (!initVis) {
+          document.body.classList.add('sleeping-mode');
+        }
+      }).catch(() => {});
+    }
+
     if ((window as any).electronAPI?.onWindowVisibilityChanged) {
-      (window as any).electronAPI.onWindowVisibilityChanged((isVisible: boolean) => {
-        console.log('[AUDIO ENGINE] Window visibility changed:', isVisible);
+      (window as any).electronAPI.onWindowVisibilityChanged(async (isVisible: boolean) => {
+        console.log(`[AUDIO ENGINE] Window visibility IPC changed: ${isVisible ? 'VISIBLE (WAKE SEQUENCE)' : 'HIDDEN (ENTER SLEEP MODE)'}`);
+        setIsOverlayVisible(isVisible);
+
+        if (!isVisible) {
+          // SLEEP MODE: Pause Spotify polling, cancel Audio Metrics RAF loop, suspend Web Audio, freeze CSS animations
+          console.log('[SLEEP MODE] Halting Spotify polling, Audio RAF, and entering sleep mode.');
+          document.body.classList.add('sleeping-mode');
+          SpotifyApiService.stopPlayerPolling();
+
+          if (animFrameRef.current) {
+            cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = null;
+          }
+
+          if (audioCtxRef.current && audioCtxRef.current.state === 'running') {
+            try {
+              await audioCtxRef.current.suspend();
+              console.log('[SLEEP MODE] Web Audio Context suspended successfully.');
+            } catch (e) {}
+          }
+        } else {
+          // WAKE SEQUENCE: Unfreeze CSS, resume AudioContext, single authoritative Spotify state fetch, resume normal polling
+          console.log('[WAKE SEQUENCE] Resuming overlay systems...');
+          document.body.classList.remove('sleeping-mode');
+
+          if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+            try {
+              await audioCtxRef.current.resume();
+              console.log('[WAKE SEQUENCE] Web Audio Context resumed successfully.');
+            } catch (e) {}
+          }
+
+          // Perform ONE Authoritative Spotify State Sync immediately on wake
+          if (isSpotifyConnected) {
+            console.log('[WAKE SEQUENCE] Performing ONE authoritative Spotify state fetch...');
+            try {
+              const state = await SpotifyApiService.getPlaybackState();
+              if (state && state.item) {
+                const fetchedTrackId = `spotify:${state.item.id}`;
+                const albumId = (state.item.album as any)?.id;
+                const spotifyTrack: Track = {
+                  id: fetchedTrackId,
+                  title: state.item.name,
+                  artist: state.item.artists?.map((a) => a.name).join(', ') || 'Unknown Artist',
+                  album: state.item.album?.name || '',
+                  coverUrl: state.item.album?.images?.[0]?.url || EMPTY_TRACK.coverUrl,
+                  duration: Math.round(state.durationMs / 1000),
+                  source: 'spotify',
+                  spotifyUri: state.item.uri,
+                  spotifyAlbumId: albumId,
+                };
+                setCurrentTrack(spotifyTrack);
+                setIsPlaying(state.isPlaying);
+                setCurrentTime(Math.round(state.progressMs / 1000));
+                setDuration(Math.round(state.durationMs / 1000));
+                setActiveSource('spotify');
+                console.log('[WAKE SEQUENCE] Spotify state synced:', spotifyTrack.title);
+              }
+            } catch (err) {
+              console.warn('[WAKE SEQUENCE] Spotify sync notice:', err);
+            }
+          }
+        }
       });
     }
-  }, []);
+  }, [isSpotifyConnected]);
 
   // Listen for Spotify Auth Code from IPC (Electron) or postMessage (Browser Popup)
   useEffect(() => {
@@ -161,9 +239,50 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const optimisticTrackLockRef = useRef<{ trackId: string; timestamp: number } | null>(null);
 
-  // Spotify Live Player Polling & Music Library Sync Engine
+  // Stable Local Playback Clock Reference (Requirements 1 & 2)
+  const playbackClockRef = useRef<{
+    baseProgressMs: number;
+    basePerformanceTime: number;
+    isPlaying: boolean;
+    durationMs: number;
+    trackId: string;
+  }>({
+    baseProgressMs: 0,
+    basePerformanceTime: performance.now(),
+    isPlaying: false,
+    durationMs: 0,
+    trackId: '',
+  });
+
+  // Calculate high-precision local playback progress (Requirement 2)
+  const getPlaybackProgressMs = useCallback((): number => {
+    if (activeSource === 'local' && audioRef.current) {
+      return Math.round(audioRef.current.currentTime * 1000);
+    }
+    const clock = playbackClockRef.current;
+    if (!clock.isPlaying) return Math.round(clock.baseProgressMs);
+    const elapsed = performance.now() - clock.basePerformanceTime;
+    const current = clock.baseProgressMs + elapsed;
+    const maxMs = clock.durationMs > 0 ? clock.durationMs : (currentTrack.duration * 1000 || Infinity);
+    return Math.round(Math.min(Math.max(0, current), maxMs));
+  }, [activeSource, currentTrack.duration]);
+
+  // Update UI text timer (currentTime) cleanly at 500ms intervals without triggering 20 FPS rerenders
   useEffect(() => {
-    if (isSpotifyConnected) {
+    if (!isOverlayVisible) return;
+
+    const interval = setInterval(() => {
+      const progressMs = getPlaybackProgressMs();
+      const seconds = Math.floor(progressMs / 1000);
+      setCurrentTime((prev) => (prev !== seconds ? seconds : prev));
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [getPlaybackProgressMs, isOverlayVisible]);
+
+  // Spotify Live Player Polling & Music Library Sync Engine (HALTED WHILE HIDDEN IN SLEEP MODE)
+  useEffect(() => {
+    if (isSpotifyConnected && isOverlayVisible) {
       SpotifyApiService.getUserProfile().then((profile) => {
         if (profile?.display_name) setSpotifyUserDisplayName(profile.display_name);
       });
@@ -240,25 +359,77 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
           spotifyAlbumId: albumId,
         };
 
-        // Atomically update state
-        setCurrentTrack(spotifyTrack);
-        setIsPlaying(state.isPlaying);
-        setCurrentTime(Math.round(state.progressMs / 1000));
-        setDuration(Math.round(state.durationMs / 1000));
-        setActiveSource('spotify');
+        // DRIFT & PLAYBACK CLOCK SYNCHRONIZATION (REQUIREMENTS 1, 4, 11)
+        const clock = playbackClockRef.current;
+        if (clock.trackId !== fetchedTrackId) {
+          console.log(`[TRACK CHANGE] new trackId: ${fetchedTrackId}, title: ${spotifyTrack.title}, progress: ${state.progressMs}ms`);
+          playbackClockRef.current = {
+            baseProgressMs: state.progressMs,
+            basePerformanceTime: performance.now(),
+            isPlaying: state.isPlaying,
+            durationMs: state.durationMs,
+            trackId: fetchedTrackId,
+          };
+        } else {
+          // Drift calculation against local predicted clock (Requirement 4)
+          const predictedMs = getPlaybackProgressMs();
+          const spotifyMs = state.progressMs;
+          const driftMs = spotifyMs - predictedMs;
+          const absDrift = Math.abs(driftMs);
+          let correctionType = 'IGNORED (<250ms)';
 
-        // Trigger Album Cover Color Extraction & Auto Theme Morphing
-        if (currentTrack.id !== spotifyTrack.id) {
-          updateGenreAndTheme(spotifyTrack);
+          if (absDrift < 250) {
+            correctionType = 'IGNORED (<250ms)';
+            playbackClockRef.current.isPlaying = state.isPlaying;
+            playbackClockRef.current.durationMs = state.durationMs;
+          } else if (absDrift <= 1000) {
+            correctionType = `SMOOTH_NUDGE (${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}ms)`;
+            playbackClockRef.current.baseProgressMs += driftMs * 0.2;
+            playbackClockRef.current.isPlaying = state.isPlaying;
+            playbackClockRef.current.durationMs = state.durationMs;
+          } else {
+            correctionType = `HARD_RESYNC (${driftMs > 0 ? '+' : ''}${Math.round(driftMs)}ms)`;
+            playbackClockRef.current = {
+              baseProgressMs: spotifyMs,
+              basePerformanceTime: performance.now(),
+              isPlaying: state.isPlaying,
+              durationMs: state.durationMs,
+              trackId: fetchedTrackId,
+            };
+          }
+
+          console.log(`[SYNC] spotify progress: ${spotifyMs}ms | predicted: ${Math.round(predictedMs)}ms | drift: ${Math.round(driftMs)}ms | correction: ${correctionType}`);
         }
+
+        // Atomically update state with reference preservation to eliminate 1.5s polling re-render glitches
+        setCurrentTrack((prevTrack) => {
+          if (
+            prevTrack.id === spotifyTrack.id &&
+            prevTrack.title === spotifyTrack.title &&
+            prevTrack.artist === spotifyTrack.artist &&
+            prevTrack.coverUrl === spotifyTrack.coverUrl
+          ) {
+            return prevTrack;
+          }
+          // Only trigger genre & theme morph when track actually changes
+          updateGenreAndTheme(spotifyTrack);
+          return spotifyTrack;
+        });
+
+        setIsPlaying((prev) => (prev !== state.isPlaying ? state.isPlaying : prev));
+        setDuration((prev) => {
+          const newDur = Math.round(state.durationMs / 1000);
+          return prev !== newDur ? newDur : prev;
+        });
+        setActiveSource((prev) => (prev !== 'spotify' ? 'spotify' : prev));
       }, 1500);
     } else {
       SpotifyApiService.stopPlayerPolling();
-      setAlbums([]);
+      if (!isSpotifyConnected) setAlbums([]);
     }
 
     return () => SpotifyApiService.stopPlayerPolling();
-  }, [isSpotifyConnected, settings.autoMorphGenreTheme]);
+  }, [isSpotifyConnected, isOverlayVisible, settings.autoMorphGenreTheme]);
 
   const ensureAudioContext = () => {
     if (!audioCtxRef.current) {
@@ -329,9 +500,9 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  // Audio metrics RAF loop — ONLY runs when isPlaying=true, throttled to 30 FPS
+  // Audio metrics RAF loop — ONLY runs when isPlaying=true AND isOverlayVisible=true, throttled to 30 FPS
   useEffect(() => {
-    if (!isPlaying) {
+    if (!isPlaying || !isOverlayVisible) {
       setAudioMetrics({ bass: 0, mid: 0, treble: 0, overall: 0, rawFrequencyData: new Uint8Array(128) });
       return;
     }
@@ -379,20 +550,26 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
         const bassVal = Math.min(1, (bassSum / 15) / 255);
         const midVal = Math.min(1, (midSum / 34) / 255);
         const trebleVal = Math.min(1, (trebleSum / 69) / 255);
-        setAudioMetrics({
-          bass: bassVal,
-          mid: midVal,
-          treble: trebleVal,
-          overall: bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2,
-          rawFrequencyData: new Uint8Array(dataArray),
-        });
+
+        // Throttle React state updates to ~16 FPS (60ms) to eliminate 60 FPS Context state churn
+        const now = Date.now();
+        if (now - lastMetricsUpdateRef.current > 60) {
+          lastMetricsUpdateRef.current = now;
+          setAudioMetrics({
+            bass: bassVal,
+            mid: midVal,
+            treble: trebleVal,
+            overall: bassVal * 0.5 + midVal * 0.3 + trebleVal * 0.2,
+            rawFrequencyData: new Uint8Array(dataArray),
+          });
+        }
       }
       animFrameRef.current = requestAnimationFrame(renderLoop);
     };
 
     animFrameRef.current = requestAnimationFrame(renderLoop);
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [isPlaying]);
+  }, [isPlaying, isOverlayVisible]);
 
   const updateGenreAndTheme = async (track: Track) => {
     const detectedMapping = GenreDetectionEngine.detectGenre(track);
@@ -400,8 +577,16 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     if (settings.autoMorphGenreTheme) {
       if (track.coverUrl) {
-        const extractedTheme = await extractThemeFromImage(track.coverUrl);
-        updateSettings({ theme: extractedTheme });
+        const { themeConfig, trackId } = await extractDynamicThemeFromImage(track.coverUrl, track.id);
+        // Race Condition Protection (Requirement 14): Discard stale palette if user rapidly switched tracks
+        if (trackId && currentTrackRef.current.id !== trackId) {
+          console.log(`[ALBUM THEME] Ignored stale extracted palette for trackId: ${trackId}`);
+          return;
+        }
+        updateSettings({
+          theme: 'dynamic-rgb',
+          customThemeConfig: themeConfig,
+        });
       } else {
         updateSettings({ theme: detectedMapping.themeId });
       }
@@ -433,6 +618,15 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const playTrack = (track: Track, contextUri?: string) => {
+    playbackClockRef.current = {
+      baseProgressMs: 0,
+      basePerformanceTime: performance.now(),
+      isPlaying: true,
+      durationMs: (track.duration || 0) * 1000,
+      trackId: track.id,
+    };
+    console.log(`[TRACK CHANGE] playTrack initiated: ${track.id} - ${track.title}`);
+
     optimisticTrackLockRef.current = { trackId: track.id, timestamp: Date.now() };
     setCurrentTrack(track);
     setCurrentTime(0);
@@ -470,6 +664,13 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const togglePlayPause = () => {
+    const nextIsPlaying = !isPlaying;
+    const currentMs = getPlaybackProgressMs();
+    playbackClockRef.current.baseProgressMs = currentMs;
+    playbackClockRef.current.basePerformanceTime = performance.now();
+    playbackClockRef.current.isPlaying = nextIsPlaying;
+    console.log(`[SYNC] [PLAY/PAUSE] hard-sync isPlaying=${nextIsPlaying} at ${Math.round(currentMs)}ms`);
+
     if (activeSource === 'spotify') {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -708,12 +909,17 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const seekTo = (timeInSeconds: number) => {
-    setCurrentTime(timeInSeconds);
+    const targetMs = Math.round(timeInSeconds * 1000);
+    playbackClockRef.current.baseProgressMs = targetMs;
+    playbackClockRef.current.basePerformanceTime = performance.now();
+    console.log(`[SYNC] [SEEK] hard-sync to ${targetMs}ms`);
+
+    setCurrentTime(Math.floor(timeInSeconds));
     if (audioRef.current && currentTrack.audioUrl) {
       audioRef.current.currentTime = timeInSeconds;
     }
     if (currentTrack.source === 'spotify') {
-      SpotifyApiService.seek(timeInSeconds * 1000).catch(console.warn);
+      SpotifyApiService.seek(targetMs).catch(console.warn);
     }
   };
 
@@ -785,6 +991,8 @@ export const AudioEngineProvider: React.FC<{ children: React.ReactNode }> = ({ c
         genreMapping,
         isSpotifyConnected,
         spotifyUserDisplayName,
+        isOverlayVisible,
+        getPlaybackProgressMs,
         playTrack,
         togglePlayPause,
         nextTrack,

@@ -19,6 +19,23 @@ export const SettingsModal: React.FC = () => {
     return 'http://127.0.0.1:3000/';
   });
   const [showGuide, setShowGuide] = useState<boolean>(false);
+  const [autoStartEnabled, setAutoStartEnabled] = useState<boolean>(false);
+
+  React.useEffect(() => {
+    if (isOpen && (window as any).electronAPI?.getAutoStart) {
+      (window as any).electronAPI.getAutoStart().then((enabled: boolean) => {
+        setAutoStartEnabled(enabled);
+      }).catch(() => {});
+    }
+  }, [isOpen]);
+
+  const handleAutoStartToggle = async () => {
+    if ((window as any).electronAPI?.setAutoStart) {
+      const nextState = !autoStartEnabled;
+      const res = await (window as any).electronAPI.setAutoStart(nextState);
+      setAutoStartEnabled(res);
+    }
+  };
 
   const handleSpotifyConnect = () => {
     if (!spotifyIdInput.trim()) {
@@ -83,30 +100,38 @@ export const SettingsModal: React.FC = () => {
 
             {/* Section 1: Themes */}
             <div className="space-y-2">
-              <label className="flex items-center space-x-2 font-mono text-xs text-slate-300">
-                <Palette className="w-3.5 h-3.5" style={{ color: themeConfig.primary }} />
-                <span>ALIEN INTERFACE SKINS</span>
+              <label className="flex items-center justify-between font-mono text-xs text-slate-300">
+                <span className="flex items-center space-x-2">
+                  <Palette className="w-3.5 h-3.5" style={{ color: themeConfig.primary }} />
+                  <span>HUD COLOR INTERFACE SKINS</span>
+                </span>
+                <span className="text-[10px] text-cyan-400 font-semibold tracking-wider">16.7M DYNAMIC RGB READY</span>
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 max-h-52 overflow-y-auto pr-1 custom-scrollbar">
                 {Object.values(THEME_CONFIGS).map((t) => {
                   const isSelected = settings.theme === t.id;
+                  const isDynamic = t.id === 'dynamic-rgb';
                   return (
                     <button
                       key={t.id}
                       onClick={() => updateSettings({ theme: t.id as ThemeId })}
-                      className="flex items-center space-x-2 p-2.5 rounded-xl border text-xs font-rajdhani font-semibold transition-all"
+                      className="flex items-center space-x-2 p-2 rounded-xl border text-xs font-rajdhani font-semibold transition-all relative overflow-hidden group"
                       style={{
-                        borderColor: isSelected ? t.primary : 'rgba(255,255,255,0.1)',
-                        backgroundColor: isSelected ? `${t.primary}25` : 'rgba(0,0,0,0.3)',
+                        borderColor: isSelected ? (isDynamic ? '#00ffaa' : t.primary) : 'rgba(255,255,255,0.1)',
+                        backgroundColor: isSelected ? (isDynamic ? 'rgba(0, 255, 170, 0.15)' : `${t.primary}25`) : 'rgba(0,0,0,0.3)',
                         color: isSelected ? '#ffffff' : '#94a3b8',
-                        boxShadow: isSelected ? `0 0 12px ${t.primary}50` : 'none',
+                        boxShadow: isSelected ? `0 0 12px ${isDynamic ? '#00ffaa' : t.primary}50` : 'none',
                       }}
                     >
-                      <span
-                        className="w-3.5 h-3.5 rounded-full"
-                        style={{ backgroundColor: t.primary, boxShadow: `0 0 6px ${t.primary}` }}
-                      />
-                      <span>{t.name}</span>
+                      {isDynamic ? (
+                        <span className="w-3.5 h-3.5 rounded-full bg-gradient-to-tr from-pink-500 via-purple-500 via-cyan-400 to-amber-400 animate-spin" style={{ animationDuration: '4s' }} />
+                      ) : (
+                        <span
+                          className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: t.primary, boxShadow: `0 0 6px ${t.primary}` }}
+                        />
+                      )}
+                      <span className="truncate">{t.name}</span>
                     </button>
                   );
                 })}
@@ -115,6 +140,21 @@ export const SettingsModal: React.FC = () => {
 
             {/* Section 2: Transparency & Glow */}
             <div className="space-y-3 font-mono text-xs text-slate-300">
+              <div className="flex items-center justify-between p-2 rounded-xl bg-black/30 border border-white/10">
+                <span>START AETHERIS WITH WINDOWS:</span>
+                <button
+                  onClick={handleAutoStartToggle}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold border transition-all"
+                  style={{
+                    backgroundColor: autoStartEnabled ? `${themeConfig.primary}25` : 'rgba(30,41,59,0.8)',
+                    borderColor: autoStartEnabled ? themeConfig.primary : 'transparent',
+                    color: autoStartEnabled ? themeConfig.primary : '#94a3b8',
+                  }}
+                >
+                  {autoStartEnabled ? 'ENABLED' : 'DISABLED'}
+                </button>
+              </div>
+
               <div className="flex items-center justify-between p-2 rounded-xl bg-black/30 border border-white/10">
                 <span>GENRE AUTO-MORPH THEMES:</span>
                 <button

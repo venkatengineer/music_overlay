@@ -5,6 +5,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleFullscreen: () => ipcRenderer.send('toggle-fullscreen'),
   closeWindow: () => ipcRenderer.send('close-window'),
   setIgnoreMouseEvents: (ignore, options) => ipcRenderer.send('set-ignore-mouse-events', ignore, options),
+  getAutoStart: () => ipcRenderer.invoke('get-auto-start'),
+  setAutoStart: (enable) => ipcRenderer.invoke('set-auto-start', enable),
+  getInitialVisibility: () => ipcRenderer.invoke('get-initial-visibility'),
   onSpotifyAuthCode: (callback) => {
     ipcRenderer.on('spotify-auth-code', (event, code) => callback(code));
   },

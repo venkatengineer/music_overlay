@@ -5,7 +5,14 @@ node_modules/
 # Build outputs
 dist/
 dist-electron/
+dist-release/
+release/
 out/
+*.exe
+*.AppImage
+*.mp4
+*.mp3
+*.wav
 
 # Environment & Local Configuration
 .env

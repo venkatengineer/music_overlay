@@ -4,13 +4,42 @@
   "version": "1.0.0",
   "type": "module",
   "main": "electron/main.cjs",
+  "description": "Alien-inspired Spotify desktop overlay",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
     "electron": "npm run build && npx electron .",
-    "electron:dev": "npm run build && npx electron ."
+    "electron:dev": "npm run build && npx electron .",
+    "dist": "npm run build && npx electron-builder --win"
+  },
+  "build": {
+    "appId": "com.aetheris.overlay",
+    "productName": "Aetheris",
+    "copyright": "Copyright © 2026 Aetheris",
+    "directories": {
+      "output": "dist-release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*"
+    ],
+    "win": {
+      "executableName": "Aetheris",
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Aetheris",
+      "uninstallDisplayName": "Aetheris Desktop Overlay"
+    }
   },
   "dependencies": {
     "clsx": "^2.1.0",

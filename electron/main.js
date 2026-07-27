@@ -71,21 +71,44 @@ async function createWindow() {
     console.error(`[ERROR] Window failed to load [${errorCode}]: ${errorDescription}`);
   });
 
+  // Send Visibility Change Event to Renderer for Sleep Mode Architecture
+  const sendVisibilityChange = (isVisible) => {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('window-visibility-changed', isVisible);
+    }
+  };
+
   // Toggle Visibility Function with Logging
   const toggleVisibility = (sourceKey) => {
     console.log(`[KEYBIND] Hotkey triggered by ${sourceKey}!`);
     if (!mainWindow) return;
 
     if (mainWindow.isVisible()) {
-      console.log('[LOG] Hiding overlay window...');
+      console.log('[LOG] Hiding overlay window (entering SLEEP MODE)...');
+      sendVisibilityChange(false);
       mainWindow.hide();
     } else {
-      console.log('[LOG] Showing & focusing overlay window...');
+      console.log('[LOG] Showing & focusing overlay window (WAKE SEQUENCE)...');
+      sendVisibilityChange(true);
       mainWindow.show();
       mainWindow.focus();
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
     }
   };
+
+  // Window Show & Hide Event Hooks for System Tray or Manual Toggle Safety
+  mainWindow.on('show', () => {
+    sendVisibilityChange(true);
+  });
+
+  mainWindow.on('hide', () => {
+    sendVisibilityChange(false);
+  });
+
+  mainWindow.on('closed', () => {
+    console.log('[LOG] Window closed.');
+    mainWindow = null;
+  });
 
   // Register Native System-Wide Global Hotkeys with Validation Logs
   const keysToRegister = [
@@ -152,10 +175,46 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll();
 });
 
+ipcMain.handle('get-auto-start', () => {
+  try {
+    const settings = app.getLoginItemSettings({
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    return settings.openAtLogin;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('set-auto-start', (event, enable) => {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin: Boolean(enable),
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    const settings = app.getLoginItemSettings({
+      path: process.execPath,
+      args: ['--startup'],
+    });
+    return settings.openAtLogin;
+  } catch (e) {
+    return false;
+  }
+});
+
+ipcMain.handle('get-initial-visibility', () => {
+  return mainWindow ? mainWindow.isVisible() : true;
+});
+
 ipcMain.on('toggle-always-on-top', (event, flag) => {
   if (mainWindow) mainWindow.setAlwaysOnTop(flag, 'screen-saver');
 });
 
 ipcMain.on('close-window', () => {
-  if (mainWindow) mainWindow.close();
+  if (mainWindow) {
+    console.log('[LOG] Hide/Close window requested by renderer — placing overlay into SLEEP MODE...');
+    mainWindow.hide();
+  }
 });

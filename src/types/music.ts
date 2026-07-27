@@ -23,7 +23,19 @@ export interface Album {
   tracks: Track[];
 }
 
-export type ThemeId = 'alien-green' | 'deep-space-blue' | 'red-plasma' | 'white-hologram' | 'amber-reactor';
+export type ThemeId =
+  | 'dynamic-rgb'
+  | 'alien-green'
+  | 'deep-space-blue'
+  | 'red-plasma'
+  | 'cyber-purple'
+  | 'neon-pink'
+  | 'electric-cyan'
+  | 'solar-gold'
+  | 'emerald-abyss'
+  | 'white-hologram'
+  | 'amber-reactor'
+  | 'obsidian-dark';
 
 export interface ThemeConfig {
   id: ThemeId;
@@ -32,10 +44,17 @@ export interface ThemeConfig {
   secondary: string;
   accent: string;
   bgHex: string;
+  surfaceHex?: string;
+  glowHex?: string;
+  primaryWeight?: number;
+  secondaryWeight?: number;
+  primaryPos?: { x: number; y: number };
+  secondaryPos?: { x: number; y: number };
 }
 
 export interface AppSettings {
   theme: ThemeId;
+  customThemeConfig?: ThemeConfig;
   transparency: number; // 0.5 - 0.98
   glowIntensity: number; // 0.2 - 2.0
   animationSpeed: number; // 0.5 - 2.0
@@ -61,4 +80,20 @@ export interface SpotifyAuthStatus {
   accessToken: string | null;
   expiresAt: number | null;
   userDisplayName?: string;
+}
+
+declare global {
+  interface Window {
+    electronAPI?: {
+      toggleAlwaysOnTop: (flag: boolean) => void;
+      toggleFullscreen: () => void;
+      closeWindow: () => void;
+      setIgnoreMouseEvents: (ignore: boolean, options?: any) => void;
+      getAutoStart: () => Promise<boolean>;
+      setAutoStart: (enable: boolean) => Promise<boolean>;
+      getInitialVisibility: () => Promise<boolean>;
+      onSpotifyAuthCode: (callback: (code: string) => void) => void;
+      onWindowVisibilityChanged: (callback: (isVisible: boolean) => void) => void;
+    };
+  }
 }

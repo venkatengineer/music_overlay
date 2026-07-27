@@ -15,7 +15,7 @@ interface Particle {
 
 export const NebulaParticlesCanvas: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { audioMetrics, isPlaying } = useAudioEngine();
+  const { audioMetrics, isPlaying, isOverlayVisible } = useAudioEngine();
   const { themeConfig, settings } = useThemeSettings();
 
   // Store volatile data in refs so the RAF loop can read them without triggering re-mount
@@ -25,6 +25,10 @@ export const NebulaParticlesCanvas: React.FC = () => {
   playingRef.current = isPlaying;
 
   useEffect(() => {
+    if (!isOverlayVisible) {
+      return;
+    }
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -131,7 +135,7 @@ export const NebulaParticlesCanvas: React.FC = () => {
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(animId);
     };
-  }, [themeConfig, settings]);
+  }, [themeConfig, settings, isOverlayVisible]);
 
   return <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" />;
 };
